@@ -1,17 +1,46 @@
 'use client';
 
-import { AlertTriangle,Radio } from 'lucide-react';
+import { AlertTriangle, Download, Loader2, Play, Radio } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
 import { useWebLiveSync } from '@/hooks/useWebLiveSync';
 
+import LoadingStyle, {
+  LoadingErrorStyle,
+  type LoadingStep,
+} from '@/components/LoadingStyle';
 import PageLayout from '@/components/PageLayout';
 import { useWatchRoomContextSafe } from '@/components/WatchRoomProvider';
 
 let Artplayer: any = null;
 let Hls: any = null;
 let flvjs: any = null;
+
+/* 初始化加载动画（后台「个性化配置 → 初始化加载样式」可切换旧版/方格/魔法阵）。
+ * 款式本身见 components/LoadingStyle。 */
+type WebLiveLoadingStepKey = 'loading' | 'fetching' | 'ready';
+
+const WEB_LIVE_LOADING_STEP_META: Record<
+  WebLiveLoadingStepKey,
+  LoadingStep
+> = {
+  loading: { label: '加载', icon: <Radio /> },
+  fetching: { label: '获取', icon: <Download /> },
+  ready: { label: '就绪', icon: <Play /> },
+};
+
+const WEB_LIVE_LOADING_STEPS: WebLiveLoadingStepKey[] = [
+  'loading',
+  'fetching',
+  'ready',
+];
+
+/* 播放器蒙层只有两步：加载，然后播放 */
+const WEB_LIVE_PLAYER_STEPS: LoadingStep[] = [
+  { label: '加载', icon: <Loader2 /> },
+  { label: '播放', icon: <Play /> },
+];
 
 export default function WebLivePage() {
   const searchParams = useSearchParams();
@@ -333,6 +362,18 @@ export default function WebLivePage() {
     setSelectedPlatform(null);
   };
 
+  // 初始化加载样式的步骤模型（说明见文件顶部）
+  const activeLiveStepIdx = Math.max(
+    0,
+    WEB_LIVE_LOADING_STEPS.indexOf(loadingStage)
+  );
+  // 方格/魔法阵不出现 emoji：阶段语义由描边图标承担，文案只留纯中文
+  const plainLoadingMessage = loadingMessage
+    .replace(/^[^一-龥]+/, '')
+    .replace(/[\s.．。]+$/, '');
+  // 蒙层只有个布尔量，没有子阶段可跟，固定停在「加载」这一格
+  const playerStepIdx = 0;
+
   // 如果功能未启用，显示提示
   if (isWebLiveEnabled === false) {
     return (
@@ -363,61 +404,75 @@ export default function WebLivePage() {
   if (loading) {
     return (
       <PageLayout activePath='/web-live'>
-        <div className='flex items-center justify-center min-h-screen bg-transparent'>
+        {/* fixed 铺满视口：main 在移动端有 3rem 顶距和底部安全区，
+            用 min-h-screen 会把内容整体压到视口中心偏下 */}
+        <div className='mtv-load-overlay fixed inset-0 flex items-center justify-center pointer-events-none'>
           <div className='text-center max-w-md mx-auto px-6'>
-            {/* 动画直播图标 */}
-            <div className='relative mb-8'>
-              <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
-                <div className='text-white text-4xl'>📺</div>
-                {/* 旋转光环 */}
-                <div className='absolute -inset-2 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl opacity-20 animate-spin'></div>
-              </div>
+            {/* 三种加载款式（旧版那一套各页自备） */}
+            <LoadingStyle
+              steps={WEB_LIVE_LOADING_STEPS.map(
+                (k) => WEB_LIVE_LOADING_STEP_META[k]
+              )}
+              activeStepIdx={activeLiveStepIdx}
+              message={plainLoadingMessage}
+              legacy={
+                <>
+                  {/* 动画直播图标 */}
+                  <div className='relative mb-8'>
+                    <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
+                      <div className='text-white text-4xl'>📺</div>
+                      {/* 旋转光环 */}
+                      <div className='absolute -inset-2 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl opacity-20 animate-spin'></div>
+                    </div>
 
-              {/* 浮动粒子效果 */}
-              <div className='absolute top-0 left-0 w-full h-full pointer-events-none'>
-                <div className='absolute top-2 left-2 w-2 h-2 bg-green-400 rounded-full animate-bounce'></div>
-                <div
-                  className='absolute top-4 right-4 w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce'
-                  style={{ animationDelay: '0.5s' }}
-                ></div>
-                <div
-                  className='absolute bottom-3 left-6 w-1 h-1 bg-lime-400 rounded-full animate-bounce'
-                  style={{ animationDelay: '1s' }}
-                ></div>
-              </div>
-            </div>
+                    {/* 浮动粒子效果 */}
+                    <div className='absolute top-0 left-0 w-full h-full pointer-events-none'>
+                      <div className='absolute top-2 left-2 w-2 h-2 bg-green-400 rounded-full animate-bounce'></div>
+                      <div
+                        className='absolute top-4 right-4 w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce'
+                        style={{ animationDelay: '0.5s' }}
+                      ></div>
+                      <div
+                        className='absolute bottom-3 left-6 w-1 h-1 bg-lime-400 rounded-full animate-bounce'
+                        style={{ animationDelay: '1s' }}
+                      ></div>
+                    </div>
+                  </div>
 
-            {/* 进度指示器 */}
-            <div className='mb-6 w-80 mx-auto'>
-              <div className='flex justify-center space-x-2 mb-4'>
-                <div
-                  className={`w-3 h-3 rounded-full transition-all duration-500 ${loadingStage === 'loading' ? 'bg-green-500 scale-125' : 'bg-green-500'}`}
-                ></div>
-                <div
-                  className={`w-3 h-3 rounded-full transition-all duration-500 ${loadingStage === 'fetching' ? 'bg-green-500 scale-125' : 'bg-green-500'}`}
-                ></div>
-                <div
-                  className={`w-3 h-3 rounded-full transition-all duration-500 ${loadingStage === 'ready' ? 'bg-green-500 scale-125' : 'bg-gray-300'}`}
-                ></div>
-              </div>
+                  {/* 进度指示器 */}
+                  <div className='mb-6 w-80 mx-auto'>
+                    <div className='flex justify-center space-x-2 mb-4'>
+                      <div
+                        className={`w-3 h-3 rounded-full transition-all duration-500 ${loadingStage === 'loading' ? 'bg-green-500 scale-125' : 'bg-green-500'}`}
+                      ></div>
+                      <div
+                        className={`w-3 h-3 rounded-full transition-all duration-500 ${loadingStage === 'fetching' ? 'bg-green-500 scale-125' : 'bg-green-500'}`}
+                      ></div>
+                      <div
+                        className={`w-3 h-3 rounded-full transition-all duration-500 ${loadingStage === 'ready' ? 'bg-green-500 scale-125' : 'bg-gray-300'}`}
+                      ></div>
+                    </div>
 
-              {/* 进度条 */}
-              <div className='w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden'>
-                <div
-                  className='h-full bg-gradient-to-r from-green-500 to-emerald-600 rounded-full transition-all duration-1000 ease-out'
-                  style={{
-                    width: loadingStage === 'loading' ? '33%' : loadingStage === 'fetching' ? '66%' : '100%',
-                  }}
-                ></div>
-              </div>
-            </div>
+                    {/* 进度条 */}
+                    <div className='w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 overflow-hidden'>
+                      <div
+                        className='h-full bg-gradient-to-r from-green-500 to-emerald-600 rounded-full transition-all duration-1000 ease-out'
+                        style={{
+                          width: loadingStage === 'loading' ? '33%' : loadingStage === 'fetching' ? '66%' : '100%',
+                        }}
+                      ></div>
+                    </div>
+                  </div>
 
-            {/* 加载消息 */}
-            <div className='space-y-2'>
-              <p className='text-xl font-semibold text-gray-800 dark:text-gray-200 animate-pulse'>
-                {loadingMessage}
-              </p>
-            </div>
+                  {/* 加载消息 */}
+                  <div className='space-y-2'>
+                    <p className='text-xl font-semibold text-gray-800 dark:text-gray-200 animate-pulse'>
+                      {loadingMessage}
+                    </p>
+                  </div>
+                </>
+              }
+            />
           </div>
         </div>
       </PageLayout>
@@ -467,15 +522,27 @@ export default function WebLivePage() {
                 {errorMessage && (
                   <div className='absolute inset-0 bg-black/90 backdrop-blur-sm rounded-xl overflow-hidden shadow-lg border border-white/0 dark:border-white/30 flex items-center justify-center z-[600] transition-all duration-300'>
                     <div className='text-center max-w-md mx-auto px-6'>
-                      <div className='relative mb-8'>
-                        <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-orange-500 to-red-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
-                          <div className='text-white text-4xl'>⚠️</div>
-                          <div className='absolute -inset-2 bg-gradient-to-r from-orange-500 to-red-600 rounded-2xl opacity-20 animate-pulse'></div>
-                        </div>
+                      {/* 错误图标：跟其他页面失败态同款，遮罩是深色底所以钉暗色 */}
+                      <div className='relative mb-4 lg:mb-8'>
+                        {/* 三种失败款式（旧版那一套各页自备） */}
+                        <LoadingErrorStyle
+                          steps={WEB_LIVE_PLAYER_STEPS}
+                          activeStepIdx={playerStepIdx}
+                          message={errorMessage}
+                          onDark
+                          legacy={
+                            <>
+                              <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-orange-500 to-red-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
+                                <div className='text-white text-4xl'>⚠️</div>
+                                <div className='absolute -inset-2 bg-gradient-to-r from-orange-500 to-red-600 rounded-2xl opacity-20 animate-pulse'></div>
+                              </div>
+                            </>
+                          }
+                        />
                       </div>
-                      <div className='space-y-4'>
+                      <div className='space-y-2 lg:space-y-4'>
                         <h3 className='text-xl font-semibold text-white'>获取直播流失败</h3>
-                        <div className='bg-orange-500/20 border border-orange-500/30 rounded-lg p-4'>
+                        <div className='mtv-err-box bg-orange-500/20 border border-orange-500/30 rounded-lg p-4'>
                           <p className='text-orange-300 font-medium'>{errorMessage}</p>
                         </div>
                         <p className='text-sm text-gray-300'>请尝试其他房间</p>
@@ -487,15 +554,26 @@ export default function WebLivePage() {
                 {isVideoLoading && (
                   <div className='absolute inset-0 bg-black/85 backdrop-blur-sm rounded-xl overflow-hidden shadow-lg border border-white/0 dark:border-white/30 flex items-center justify-center z-[500] transition-all duration-300'>
                     <div className='text-center max-w-md mx-auto px-6'>
-                      <div className='relative mb-8'>
-                        <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
-                          <div className='text-white text-4xl'>📺</div>
-                          <div className='absolute -inset-2 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl opacity-20 animate-spin'></div>
-                        </div>
-                      </div>
-                      <div className='space-y-2'>
-                        <p className='text-xl font-semibold text-white animate-pulse'>🔄 加载中...</p>
-                      </div>
+                      {/* 三种加载款式（旧版那一套各页自备） */}
+                      <LoadingStyle
+                        steps={WEB_LIVE_PLAYER_STEPS}
+                        activeStepIdx={playerStepIdx}
+                        message='加载中'
+                        onDark
+                        legacy={
+                          <>
+                            <div className='relative mb-8'>
+                              <div className='relative mx-auto w-24 h-24 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl shadow-2xl flex items-center justify-center transform hover:scale-105 transition-transform duration-300'>
+                                <div className='text-white text-4xl'>📺</div>
+                                <div className='absolute -inset-2 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl opacity-20 animate-spin'></div>
+                              </div>
+                            </div>
+                            <div className='space-y-2'>
+                              <p className='text-xl font-semibold text-white animate-pulse'>🔄 加载中...</p>
+                            </div>
+                          </>
+                        }
+                      />
                     </div>
                   </div>
                 )}

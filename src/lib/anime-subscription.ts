@@ -86,9 +86,52 @@ export function titleContainsEpisode(title: string, episode: number): boolean {
 }
 
 /**
- * 从标题中提取集数
+ * 校验自定义集数正则：可编译且结果可解析即合法
  */
-export function extractEpisode(title: string): number | null {
+export function validateEpisodeRegex(regex: string): { ok: boolean; error?: string } {
+  const trimmed = regex.trim();
+  if (!trimmed) return { ok: true };
+  try {
+    // eslint-disable-next-line no-new
+    new RegExp(trimmed);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '正则无效' };
+  }
+}
+
+/**
+ * 用自定义正则从标题中提取集数（首个捕获组；无捕获组时取整个匹配）
+ */
+export function extractEpisodeWithRegex(
+  title: string,
+  regex: string
+): number | null {
+  const trimmed = regex.trim();
+  if (!trimmed) return null;
+  let re: RegExp;
+  try {
+    re = new RegExp(trimmed);
+  } catch {
+    return null;
+  }
+  const match = title.match(re);
+  if (!match) return null;
+  const raw = match[1] ?? match[0];
+  const ep = parseInt(raw, 10);
+  if (!Number.isFinite(ep) || ep <= 0 || ep >= 1000) return null;
+  return ep;
+}
+
+/**
+ * 从标题中提取集数。
+ * episodeRegex：自定义集数正则（可选），填写后优先于内置规则（不匹配则视为无法识别）
+ */
+export function extractEpisode(title: string, episodeRegex?: string): number | null {
+  if (episodeRegex && episodeRegex.trim()) {
+    return extractEpisodeWithRegex(title, episodeRegex);
+  }
+
   const parsed = parseTorrentName(title);
 
   if (parsed.episode) {
@@ -150,17 +193,20 @@ function filterAndParseEpisodes(
 ): AcgSearchItem[] {
   const only = opts?.onlyEpisode;
   const minExclusive = opts?.minEpisodeExclusive ?? -Infinity;
+  const customRegex = subscription.episodeRegex?.trim();
 
   return results
     .filter((item) => matchesFilter(item.title, subscription.filterText))
     .filter((item) => !matchesExclude(item.title, subscription.excludeText))
     .map((item) => {
-      const episode = extractEpisode(item.title);
+      const episode = extractEpisode(item.title, subscription.episodeRegex);
       return { ...item, episode };
     })
     .filter((item) => {
       if (!item.episode) return false;
       if (only != null) {
+        // 自定义正则时信任正则结果，不再叠加内置形态校验
+        if (customRegex) return item.episode === only;
         return (
           item.episode === only && titleContainsEpisode(item.title, only)
         );
@@ -171,6 +217,56 @@ function filterAndParseEpisodes(
 }
 
 /**
+ * 集数过滤测试：按表单参数实际搜索一次，返回关键词命中与集数提取结果
+ */
+export async function testEpisodeFilter(params: {
+  title: string;
+  filterText: string;
+  excludeText?: string;
+  source: 'acgrip' | 'mikan' | 'dmhy' | 'nyaa';
+  episodeRegex?: string;
+  lastEpisode?: number;
+}) {
+  const results: AcgSearchItem[] = await searchACG(params.title, params.source);
+  const filtered = results
+    .filter((item) => matchesFilter(item.title, params.filterText))
+    .filter((item) => !matchesExclude(item.title, params.excludeText));
+
+  const items: Array<{ title: string; episode: number | null }> = filtered
+    .map((item) => ({
+      title: item.title,
+      episode: extractEpisode(item.title, params.episodeRegex),
+    }))
+    .sort((a, b) => {
+      if (a.episode == null && b.episode == null) return 0;
+      if (a.episode == null) return 1;
+      if (b.episode == null) return -1;
+      return a.episode - b.episode;
+    });
+
+  const episodes = Array.from(
+    new Set(
+      items
+        .map((i) => i.episode)
+        .filter((ep): ep is number => typeof ep === 'number')
+    )
+  ).sort((a, b) => a - b);
+  const last = params.lastEpisode || 0;
+  const newEpisodes = episodes.filter((ep) => ep > last);
+  const unparsed = items.filter((i) => i.episode == null).length;
+
+  return {
+    total: results.length,
+    matched: filtered.length,
+    lastEpisode: last,
+    episodes,
+    newEpisodes,
+    unparsed,
+    items,
+  };
+}
+
+/**
  * 缺集补搜：在 (lastEpisode, maxFound] 内对未命中集按「番名 + 补零集数」再搜
  */
 async function refillMissingEpisodeResults(
@@ -178,6 +274,7 @@ async function refillMissingEpisodeResults(
   existing: AcgSearchItem[]
 ): Promise<AcgSearchItem[]> {
   const last = subscription.lastEpisode || 0;
+  const customRegex = subscription.episodeRegex?.trim();
   const foundEps = new Set(
     existing
       .map((i) => i.episode)
@@ -240,7 +337,7 @@ async function refillMissingEpisodeResults(
       (item) =>
         item.episode &&
         item.episode > last &&
-        titleContainsEpisode(item.title, item.episode)
+        (customRegex ? true : titleContainsEpisode(item.title, item.episode))
     )
     .sort((a, b) => (a.episode || 0) - (b.episode || 0));
 }

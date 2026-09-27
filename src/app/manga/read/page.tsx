@@ -5,10 +5,31 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 
+import { cn } from '@/lib/cn';
 import { getAllMangaReadRecords, getAllMangaShelf, saveMangaReadRecord, saveMangaShelf } from '@/lib/db.client';
 import type { MangaChapter, MangaDetail, MangaReadRecord, MangaShelfItem } from '@/lib/manga.types';
 import { processImageUrl } from '@/lib/utils';
 
+import {
+  LIBRARY_BUTTON,
+  LIBRARY_FIELD,
+  LIBRARY_FOCUS,
+  LIBRARY_GHOST_BUTTON,
+  LIBRARY_MUTED,
+  LIBRARY_ROW,
+  LIBRARY_ROW_ACTIVE,
+  LIBRARY_SERIF,
+  LIBRARY_TEXT,
+  READER_CANVAS,
+  READER_CANVAS_SKELETON,
+  READER_HUD,
+  READER_SEGMENT,
+  READER_SEGMENT_ACTIVE,
+  READER_SEGMENT_IDLE,
+  READER_SHEET,
+  READER_SLIDER,
+  READER_TOOLTIP,
+} from '@/components/media/library';
 import ProxyImage from '@/components/ProxyImage';
 
 type ReadMode = 'single' | 'double' | 'vertical' | 'horizontal';
@@ -19,6 +40,9 @@ const SCALE_MODE_STORAGE_KEY = 'mangaScaleMode';
 const PAGE_GAP_STORAGE_KEY = 'mangaPageGap';
 const SAVE_INTERVAL_MS = 10000;
 const PRELOAD_PAGE_COUNT = 5;
+const BOTTOM_REACH_THRESHOLD = 24;
+// 图片是懒加载且未预留宽高比，锚定后布局还会被撑开，在这段时间内持续纠偏
+const ANCHOR_HOLD_MS = 8000;
 
 const READ_MODE_OPTIONS: Array<{ value: ReadMode; label: string }> = [
   { value: 'single', label: '单页' },
@@ -38,7 +62,7 @@ function MangaReadSkeleton({ readMode, pageGap }: { readMode: ReadMode; pageGap:
       <div className='flex min-h-[calc(100vh-8rem)] overflow-hidden' style={{ gap: `${pageGap}px` }}>
         {Array.from({ length: 2 }).map((_, index) => (
           <div key={index} className='flex min-w-full items-center justify-center px-1'>
-            <div className='h-full min-h-[calc(100vh-8rem)] w-full animate-pulse bg-gray-100 dark:bg-gray-900' />
+            <div className={cn('h-full min-h-[calc(100vh-8rem)] w-full', READER_CANVAS_SKELETON)} />
           </div>
         ))}
       </div>
@@ -53,7 +77,7 @@ function MangaReadSkeleton({ readMode, pageGap }: { readMode: ReadMode; pageGap:
           style={{ gap: `${pageGap}px` }}
         >
           {Array.from({ length: readMode === 'double' ? 2 : 1 }).map((_, index) => (
-            <div key={index} className='min-h-[calc(100vh-8rem)] animate-pulse bg-gray-100 dark:bg-gray-900' />
+            <div key={index} className={cn('min-h-[calc(100vh-8rem)]', READER_CANVAS_SKELETON)} />
           ))}
         </div>
       </div>
@@ -63,8 +87,44 @@ function MangaReadSkeleton({ readMode, pageGap }: { readMode: ReadMode; pageGap:
   return (
     <div className='flex flex-col' style={{ gap: `${pageGap}px` }}>
       {Array.from({ length: 4 }).map((_, index) => (
-        <div key={index} className='aspect-[3/4] animate-pulse bg-gray-100 dark:bg-gray-900' />
+        <div key={index} className={cn('aspect-[3/4]', READER_CANVAS_SKELETON)} />
       ))}
+    </div>
+  );
+}
+
+function ChapterEndActions({
+  nextHref,
+  nextName,
+  detailHref,
+  className = '',
+}: {
+  nextHref: string | null;
+  nextName: string;
+  detailHref: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`flex flex-col items-center gap-3 ${className}`}
+      onClick={(event) => event.stopPropagation()}
+    >
+      {nextHref ? (
+        <Link
+          href={nextHref}
+          className={cn('w-full max-w-sm px-4 py-3', LIBRARY_BUTTON)}
+        >
+          下一话：{nextName}
+        </Link>
+      ) : (
+        <div className={cn('text-sm', LIBRARY_MUTED)}>已经是最后一话</div>
+      )}
+      <Link
+        href={detailHref}
+        className={cn('w-full max-w-sm px-4 py-3', LIBRARY_GHOST_BUTTON)}
+      >
+        返回详情
+      </Link>
     </div>
   );
 }
@@ -91,6 +151,8 @@ export default function MangaReadPage() {
   const [chapterListDesc, setChapterListDesc] = useState(false);
   const [mangaDetail, setMangaDetail] = useState<MangaDetail | null>(null);
   const [showChapterComplete, setShowChapterComplete] = useState(false);
+  const [jumpDialogOpen, setJumpDialogOpen] = useState(false);
+  const [jumpValue, setJumpValue] = useState('');
 
   const verticalPageRefs = useRef<Array<HTMLDivElement | null>>([]);
   const horizontalContainerRef = useRef<HTMLDivElement | null>(null);
@@ -103,9 +165,64 @@ export default function MangaReadPage() {
   const currentVerticalPageIndexRef = useRef(0);
   const preloadedImageUrlsRef = useRef<Set<string>>(new Set());
   const activeChapterRef = useRef<HTMLAnchorElement | null>(null);
+  const pendingAnchorPageRef = useRef<number | null>(null);
+  const pendingAnchorDeadlineRef = useRef(0);
+
+  const releasePendingAnchor = () => {
+    pendingAnchorPageRef.current = null;
+  };
+
+  // globals.css 给 html/body 都设了 height:100% + overflow-x:hidden，纵向真正滚动的
+  // 可能是 body 而不是 documentElement（那样 window.scrollY / scrollingElement.scrollTop
+  // 恒为 0），所以读写都按"取真正可滚的那个"处理，两种情形都成立
+  const getVerticalScroller = () => {
+    const candidates = [document.documentElement, document.body].filter(
+      (el): el is HTMLElement => !!el && el.scrollHeight > el.clientHeight + 1
+    );
+    if (!candidates.length) return document.scrollingElement || document.documentElement;
+    return candidates.reduce((best, el) =>
+      el.scrollHeight - el.clientHeight > best.scrollHeight - best.clientHeight ? el : best
+    );
+  };
+
+  const getVerticalScrollTop = () =>
+    Math.max(
+      window.scrollY || 0,
+      document.documentElement.scrollTop || 0,
+      document.body.scrollTop || 0
+    );
+
+  const getVerticalMaxScrollTop = () => {
+    const scroller = getVerticalScroller();
+    return Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  };
+
+  const isScrolledToBottom = () => {
+    if (typeof window === 'undefined' || !document.body) return false;
+    const maxScrollTop = getVerticalMaxScrollTop();
+    if (maxScrollTop < BOTTOM_REACH_THRESHOLD) return false;
+    return getVerticalScrollTop() >= maxScrollTop - BOTTOM_REACH_THRESHOLD;
+  };
+
+  // 进入章节后把目标页钉在固定头部下沿：图片逐个加载会不断把布局撑开，
+  // 所以在持有期内反复纠偏。页面上滚动的 scroll-margin-top 见渲染处的 scroll-mt-*
+  const applyPendingAnchor = () => {
+    if (readMode !== 'vertical') return;
+    const target = pendingAnchorPageRef.current;
+    if (target === null) return;
+    if (Date.now() > pendingAnchorDeadlineRef.current) {
+      pendingAnchorPageRef.current = null;
+      return;
+    }
+    verticalPageRefs.current[target]?.scrollIntoView({ block: 'start' });
+  };
 
   const getCurrentVerticalPageIndex = () => {
-    if (!verticalPageRefs.current.length) return 0;
+    if (!verticalPageRefs.current.length || !pages.length) return 0;
+
+    // 末页往往比视口矮，滑到底时它的顶边仍低于 topAnchor，只靠顶边判定会一直停在倒数第二页
+    if (isScrolledToBottom()) return pages.length - 1;
+
     const topAnchor = 80;
     let currentIndex = 0;
 
@@ -233,40 +350,49 @@ export default function MangaReadPage() {
 
     let cancelled = false;
 
+    // 进入章节时自行接管滚动位置：上一页/上一话残留的偏移不会带进来，
+    // 有进度就落到上次读到的那页，没有就从第一页开始
+    const applyEntryPosition = (targetPage: number) => {
+      if (readMode === 'vertical') {
+        pendingAnchorPageRef.current = targetPage;
+        pendingAnchorDeadlineRef.current = Date.now() + ANCHOR_HOLD_MS;
+        applyPendingAnchor();
+        return;
+      }
+
+      getVerticalScroller().scrollTo({ top: 0, left: 0, behavior: 'auto' });
+
+      if (readMode === 'horizontal') {
+        scrollHorizontalToPage(targetPage, 'auto');
+      }
+    };
+
+    const scheduleEntryPosition = (targetPage: number) => {
+      window.setTimeout(() => applyEntryPosition(targetPage), 0);
+    };
+
     getAllMangaReadRecords()
       .then((records) => {
         if (cancelled) return;
 
         const record = records[`${sourceId}+${mangaId}`];
+        restoredChapterKeyRef.current = chapterKey;
+
         if (!record || record.chapterId !== chapterId) {
-          restoredChapterKeyRef.current = chapterKey;
+          setActivePage(0);
+          scheduleEntryPosition(0);
           return;
         }
 
         const nextPage = Math.min(Math.max(record.pageIndex || 0, 0), Math.max(pages.length - 1, 0));
         setActivePage(nextPage);
-        restoredChapterKeyRef.current = chapterKey;
-
-        if (readMode === 'vertical') {
-          window.setTimeout(() => {
-            const node = verticalPageRefs.current[nextPage];
-            node?.scrollIntoView({ block: 'start' });
-          }, 0);
-          return;
-        }
-
-        if (readMode === 'horizontal') {
-          window.setTimeout(() => {
-            const container = horizontalContainerRef.current;
-            if (!container) return;
-            container.scrollTo({
-              left: container.clientWidth * nextPage,
-              behavior: 'auto',
-            });
-          }, 0);
-        }
+        scheduleEntryPosition(nextPage);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (cancelled) return;
+        restoredChapterKeyRef.current = chapterKey;
+        scheduleEntryPosition(0);
+      });
 
     return () => {
       cancelled = true;
@@ -277,6 +403,26 @@ export default function MangaReadPage() {
     setShowChapterComplete(false);
   }, [activePage, chapterId, readMode]);
 
+  // 用户一旦自己操作（滑动/点击翻页/键盘）就停止纠偏，避免把人拽回锚点
+  useEffect(() => {
+    if (readMode !== 'vertical') return;
+
+    const release = () => releasePendingAnchor();
+    window.addEventListener('touchstart', release, { passive: true });
+    window.addEventListener('pointerdown', release, { passive: true });
+    window.addEventListener('mousedown', release, { passive: true });
+    window.addEventListener('wheel', release, { passive: true });
+    window.addEventListener('keydown', release);
+
+    return () => {
+      window.removeEventListener('touchstart', release);
+      window.removeEventListener('pointerdown', release);
+      window.removeEventListener('mousedown', release);
+      window.removeEventListener('wheel', release);
+      window.removeEventListener('keydown', release);
+    };
+  }, [readMode]);
+
   useEffect(() => {
     if (readMode !== 'vertical' || !pages.length || !mangaId || !sourceId || !chapterId) return;
 
@@ -284,10 +430,10 @@ export default function MangaReadPage() {
     let rafId = 0;
     let lastScrollTop = -1;
     let lastInnerHeight = -1;
-    const scrollingElement = document.scrollingElement || document.documentElement;
 
     const updateActivePageFromViewport = () => {
       ticking = false;
+      applyPendingAnchor();
       const nextIndex = getCurrentVerticalPageIndex();
       currentVerticalPageIndexRef.current = nextIndex;
 
@@ -303,7 +449,7 @@ export default function MangaReadPage() {
     requestVerticalPageSyncRef.current = requestUpdate;
 
     const watchScrollPosition = () => {
-      const nextScrollTop = scrollingElement.scrollTop;
+      const nextScrollTop = getVerticalScrollTop();
       const nextInnerHeight = window.innerHeight;
 
       if (nextScrollTop !== lastScrollTop || nextInnerHeight !== lastInnerHeight) {
@@ -350,14 +496,15 @@ export default function MangaReadPage() {
     if (!container) return;
 
     const onScroll = () => {
-      const width = container.clientWidth || 1;
-      const nextPage = Math.round(container.scrollLeft / width);
+      // 每屏宽度是容器宽度加图片间隔，用宽度直接算会随间隔累积偏移
+      const pitch = (container.clientWidth || 1) + pageGap;
+      const nextPage = Math.round(container.scrollLeft / pitch);
       setActivePage(Math.min(Math.max(nextPage, 0), Math.max(pages.length - 1, 0)));
     };
 
     container.addEventListener('scroll', onScroll, { passive: true });
     return () => container.removeEventListener('scroll', onScroll);
-  }, [readMode, pages.length]);
+  }, [readMode, pages.length, pageGap]);
 
   useEffect(() => {
     if (!pages.length) {
@@ -381,12 +528,7 @@ export default function MangaReadPage() {
 
     if (readMode === 'horizontal') {
       window.setTimeout(() => {
-        const container = horizontalContainerRef.current;
-        if (!container) return;
-        container.scrollTo({
-          left: container.clientWidth * targetPage,
-          behavior: 'auto',
-        });
+        scrollHorizontalToPage(targetPage, 'auto');
       }, 0);
     }
   }, [activePage, pages.length, readMode]);
@@ -539,9 +681,7 @@ export default function MangaReadPage() {
     }
 
     if (readMode === 'vertical') {
-      const scrollBottom = window.scrollY + window.innerHeight;
-      const pageBottom = document.documentElement.scrollHeight;
-      return activePage >= pages.length - 1 && scrollBottom >= pageBottom - 24;
+      return activePage >= pages.length - 1 && isScrolledToBottom();
     }
 
     return activePage >= pages.length - 1;
@@ -560,19 +700,48 @@ export default function MangaReadPage() {
     return Math.min(Math.max(page, 0), pages.length - 1);
   };
 
-  const scrollHorizontalToPage = (page: number) => {
+  const scrollHorizontalToPage = (page: number, behavior: ScrollBehavior = 'smooth') => {
     const container = horizontalContainerRef.current;
     if (!container) return;
+    // 每屏宽度是容器宽度加图片间隔，只用宽度乘页码会随间隔累积错位
+    const pitch = (container.clientWidth || 1) + pageGap;
     container.scrollTo({
-      left: container.clientWidth * page,
-      behavior: 'smooth',
+      left: pitch * page,
+      behavior,
     });
+  };
+
+  const openJumpDialog = () => {
+    if (pages.length <= 1) return;
+    setJumpValue(String(Math.min(activePage + 1, pages.length)));
+    setJumpDialogOpen(true);
+  };
+
+  const jumpToPage = (page: number) => {
+    const next = clampPage(page);
+
+    if (readMode === 'vertical') {
+      // 大跨度跳页用瞬时定位，平滑滚动会一路扫过中间所有图
+      pendingAnchorPageRef.current = null;
+      verticalPageRefs.current[next]?.scrollIntoView({ block: 'start' });
+    } else if (readMode === 'horizontal') {
+      scrollHorizontalToPage(next, 'auto');
+    }
+
+    setActivePage(next);
+  };
+
+  const submitJump = () => {
+    const parsed = Number.parseInt(jumpValue, 10);
+    setJumpDialogOpen(false);
+    if (!Number.isFinite(parsed)) return;
+    jumpToPage(parsed - 1);
   };
 
   const goPrev = () => {
     if (!pages.length) return;
     if (readMode === 'vertical') {
-      window.scrollBy({ top: -window.innerHeight * 0.85, behavior: 'smooth' });
+      getVerticalScroller().scrollBy({ top: -window.innerHeight * 0.85, behavior: 'smooth' });
       hideTransientUi();
       return;
     }
@@ -591,7 +760,7 @@ export default function MangaReadPage() {
     if (!pages.length) return;
     if (readMode === 'vertical') {
       if (openChapterComplete()) return;
-      window.scrollBy({ top: window.innerHeight * 0.85, behavior: 'smooth' });
+      getVerticalScroller().scrollBy({ top: window.innerHeight * 0.85, behavior: 'smooth' });
       hideTransientUi();
       return;
     }
@@ -628,6 +797,12 @@ export default function MangaReadPage() {
 
     return orderedChapters[currentIndex + 1];
   }, [chapterId, mangaDetail?.chapters]);
+
+  const buildChapterHref = (target: MangaChapter) =>
+    `/manga/read?mangaId=${mangaId}&sourceId=${sourceId}&chapterId=${target.id}&title=${encodeURIComponent(title)}&cover=${encodeURIComponent(cover)}&sourceName=${encodeURIComponent(sourceName)}&chapterName=${encodeURIComponent(target.name)}&returnTo=${encodeURIComponent(returnTo)}`;
+
+  const buildDetailHref = () =>
+    `/manga/detail?mangaId=${mangaId}&sourceId=${sourceId}&title=${encodeURIComponent(title)}&cover=${encodeURIComponent(cover)}&sourceName=${encodeURIComponent(sourceName)}&returnTo=${encodeURIComponent(returnTo)}`;
 
   const chapterList = useMemo(() => {
     const chapters = mangaDetail?.chapters || [];
@@ -712,27 +887,37 @@ export default function MangaReadPage() {
           onClick={() => setSettingsOpen(false)}
         >
           <div
-            className='w-full max-w-sm rounded-3xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-950'
+            className={cn(READER_SHEET, 'w-full max-w-sm p-5')}
             onClick={(e) => e.stopPropagation()}
           >
             <div className='mb-4'>
-              <div className='text-base font-semibold text-gray-900 dark:text-gray-100'>阅读设置</div>
-              <div className='mt-1 text-xs text-gray-500'>可继续扩展更多阅读参数</div>
+              <div
+                className={cn(
+                  'text-base font-semibold',
+                  LIBRARY_TEXT,
+                  LIBRARY_SERIF
+                )}
+              >
+                阅读设置
+              </div>
             </div>
 
             <div className='space-y-5'>
               <div>
-                <div className='mb-2 text-sm font-medium text-gray-700 dark:text-gray-200'>显示方式</div>
+                <div className={cn('mb-2 text-sm font-medium', LIBRARY_TEXT)}>
+                  显示方式
+                </div>
                 <div className='grid grid-cols-2 gap-2'>
                   {READ_MODE_OPTIONS.map((option) => (
                     <button
                       key={option.value}
                       type='button'
-                      className={`rounded-2xl px-3 py-2 text-sm transition ${
+                      className={cn(
+                        READER_SEGMENT,
                         readMode === option.value
-                          ? 'bg-sky-600 text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800'
-                      }`}
+                          ? READER_SEGMENT_ACTIVE
+                          : READER_SEGMENT_IDLE
+                      )}
                       onClick={() => setReadMode(option.value)}
                     >
                       {option.label}
@@ -742,17 +927,20 @@ export default function MangaReadPage() {
               </div>
 
               <div>
-                <div className='mb-2 text-sm font-medium text-gray-700 dark:text-gray-200'>缩放类型</div>
+                <div className={cn('mb-2 text-sm font-medium', LIBRARY_TEXT)}>
+                  缩放类型
+                </div>
                 <div className='grid grid-cols-2 gap-2'>
                   {SCALE_MODE_OPTIONS.map((option) => (
                     <button
                       key={option.value}
                       type='button'
-                      className={`rounded-2xl px-3 py-2 text-sm transition ${
+                      className={cn(
+                        READER_SEGMENT,
                         scaleMode === option.value
-                          ? 'bg-sky-600 text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800'
-                      }`}
+                          ? READER_SEGMENT_ACTIVE
+                          : READER_SEGMENT_IDLE
+                      )}
                       onClick={() => setScaleMode(option.value)}
                     >
                       {option.label}
@@ -762,9 +950,16 @@ export default function MangaReadPage() {
               </div>
 
               <div>
-                <div className='mb-2 flex items-center justify-between text-sm font-medium text-gray-700 dark:text-gray-200'>
+                <div
+                  className={cn(
+                    'mb-2 flex items-center justify-between text-sm font-medium',
+                    LIBRARY_TEXT
+                  )}
+                >
                   <span>图片间隔</span>
-                  <span className='text-xs text-gray-500'>{pageGap}px</span>
+                  <span className={cn('text-xs', LIBRARY_MUTED)}>
+                    {pageGap}px
+                  </span>
                 </div>
                 <input
                   type='range'
@@ -773,15 +968,17 @@ export default function MangaReadPage() {
                   step='2'
                   value={pageGap}
                   onChange={(e) => setPageGap(Number(e.target.value))}
-                  className='w-full accent-sky-600'
+                  className={READER_SLIDER}
                 />
-                <div className='mt-1 text-xs text-gray-500'>滚动阅读时，两张图片之间的间隔</div>
+                <div className={cn('mt-1 text-xs', LIBRARY_MUTED)}>
+                  滚动阅读时，两张图片之间的间隔
+                </div>
               </div>
 
               <div className='flex justify-end'>
                 <button
                   type='button'
-                  className='rounded-2xl bg-sky-600 px-4 py-2 text-sm font-medium text-white'
+                  className={LIBRARY_BUTTON}
                   onClick={() => setSettingsOpen(false)}
                 >
                   完成
@@ -795,14 +992,14 @@ export default function MangaReadPage() {
       {chapterListOpen && (
         <div className='fixed inset-0 z-40 bg-black/30' onClick={() => setChapterListOpen(false)}>
           <div
-            className='absolute right-0 top-14 h-[calc(100vh-3.5rem)] w-full max-w-sm overflow-y-auto border-l border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-950 sm:top-16 sm:h-[calc(100vh-4rem)]'
+            className='absolute right-0 top-14 h-[calc(100vh-3.5rem)] w-full max-w-sm overflow-y-auto border-l border-library-edge bg-library-card shadow-xl dark:border-library-night-edge dark:bg-library-night-card sm:top-16 sm:h-[calc(100vh-4rem)]'
             onClick={(event) => event.stopPropagation()}
           >
             <div className='p-4'>
               <div className='mb-3 flex items-center justify-end'>
                 <button
                   type='button'
-                  className='inline-flex items-center gap-2 rounded-2xl border border-gray-200 px-3 py-2 text-sm text-gray-700 transition hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-900'
+                  className={cn(LIBRARY_GHOST_BUTTON, 'px-3 py-2')}
                   onClick={() => setChapterListDesc((prev) => !prev)}
                 >
                   {chapterListDesc ? <ArrowDownWideNarrow className='h-4 w-4' /> : <ArrowUpWideNarrow className='h-4 w-4' />}
@@ -816,16 +1013,26 @@ export default function MangaReadPage() {
                     <Link
                       key={chapter.id}
                       ref={active ? activeChapterRef : null}
-                      href={`/manga/read?mangaId=${mangaId}&sourceId=${sourceId}&chapterId=${chapter.id}&title=${encodeURIComponent(title)}&cover=${encodeURIComponent(cover)}&sourceName=${encodeURIComponent(sourceName)}&chapterName=${encodeURIComponent(chapter.name)}&returnTo=${encodeURIComponent(returnTo)}`}
-                      className={`group relative block rounded-2xl px-4 py-3 text-sm transition ${
+                      href={buildChapterHref(chapter)}
+                      className={cn(
+                        'group relative block px-4 py-3 text-sm transition-colors duration-200',
+                        LIBRARY_FOCUS,
                         active
-                          ? 'bg-sky-600 text-white'
-                          : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-900'
-                      }`}
+                          ? cn('rounded-md border', LIBRARY_ROW_ACTIVE)
+                          : cn(
+                              LIBRARY_ROW,
+                              'hover:border-library-ochre dark:hover:border-library-night-ochre'
+                            )
+                      )}
                       onClick={() => setChapterListOpen(false)}
                     >
                       <span className='block truncate'>{chapter.name}</span>
-                      <div className='absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-800 dark:bg-gray-900 text-white text-sm rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 ease-out whitespace-nowrap z-[100] pointer-events-none'>
+                      <div
+                        className={cn(
+                          'pointer-events-none invisible absolute bottom-full left-1/2 z-[100] mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg px-3 py-2 text-sm opacity-0 shadow-xl transition-all duration-200 ease-out group-hover:visible group-hover:opacity-100',
+                          READER_TOOLTIP
+                        )}
+                      >
                         <div className='text-sm'>{chapter.name}</div>
                       </div>
                     </Link>
@@ -844,25 +1051,33 @@ export default function MangaReadPage() {
         {showChapterComplete && (
           <div className='fixed inset-0 z-30 flex items-center justify-center bg-black/60 px-4' onClick={() => setShowChapterComplete(false)}>
             <div
-              className='w-full max-w-sm rounded-3xl border border-gray-200 bg-white p-6 text-center shadow-xl dark:border-gray-700 dark:bg-gray-950'
+              className={cn(READER_SHEET, 'w-full max-w-sm p-6 text-center')}
               onClick={(event) => event.stopPropagation()}
             >
-              <div className='text-lg font-semibold text-gray-900 dark:text-gray-100'>{chapterName} 阅读完毕</div>
-              <div className='mt-2 text-sm text-gray-500 dark:text-gray-400'>
+              <div
+                className={cn(
+                  'text-lg font-semibold',
+                  LIBRARY_TEXT,
+                  LIBRARY_SERIF
+                )}
+              >
+                {chapterName} 阅读完毕
+              </div>
+              <div className={cn('mt-2 text-sm', LIBRARY_MUTED)}>
                 {nextChapter ? '当前章节已读完，可继续阅读下一话' : '当前章节已读完'}
               </div>
               <div className='mt-6 flex flex-col gap-3'>
                 {nextChapter ? (
                   <Link
-                    href={`/manga/read?mangaId=${mangaId}&sourceId=${sourceId}&chapterId=${nextChapter.id}&title=${encodeURIComponent(title)}&cover=${encodeURIComponent(cover)}&sourceName=${encodeURIComponent(sourceName)}&chapterName=${encodeURIComponent(nextChapter.name)}&returnTo=${encodeURIComponent(returnTo)}`}
-                    className='rounded-2xl bg-sky-600 px-4 py-3 text-sm font-medium text-white transition hover:bg-sky-700'
+                    href={buildChapterHref(nextChapter)}
+                    className={cn('px-4 py-3', LIBRARY_BUTTON)}
                   >
                     下一话：{nextChapter.name}
                   </Link>
                 ) : null}
                 <button
                   type='button'
-                  className='rounded-2xl border border-gray-200 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-900'
+                  className={cn('px-4 py-3', LIBRARY_GHOST_BUTTON)}
                   onClick={() => setShowChapterComplete(false)}
                 >
                   关闭
@@ -872,21 +1087,80 @@ export default function MangaReadPage() {
           </div>
         )}
 
+        {jumpDialogOpen && (
+          <div
+            className='fixed inset-0 z-30 flex items-center justify-center bg-black/60 px-4'
+            onClick={(event) => {
+              event.stopPropagation();
+              setJumpDialogOpen(false);
+            }}
+          >
+            <form
+              className={cn(READER_SHEET, 'w-full max-w-xs p-6')}
+              onClick={(event) => event.stopPropagation()}
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitJump();
+              }}
+            >
+              <div className={cn('text-base font-semibold', LIBRARY_TEXT, LIBRARY_SERIF)}>
+                跳转到指定页
+              </div>
+              <div className={cn('mt-1 text-xs', LIBRARY_MUTED)}>
+                共 {pages.length} 页
+              </div>
+              <input
+                autoFocus
+                type='number'
+                inputMode='numeric'
+                min={1}
+                max={pages.length}
+                value={jumpValue}
+                onChange={(event) => setJumpValue(event.target.value)}
+                className={cn(LIBRARY_FIELD, 'mt-4 px-3 py-2')}
+              />
+              <div className='mt-5 flex gap-3'>
+                <button
+                  type='button'
+                  className={cn('flex-1 px-4 py-3', LIBRARY_GHOST_BUTTON)}
+                  onClick={() => setJumpDialogOpen(false)}
+                >
+                  取消
+                </button>
+                <button type='submit' className={cn('flex-1 px-4 py-3', LIBRARY_BUTTON)}>
+                  跳转
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
         <div
-          className={`fixed right-3 top-1/2 z-20 h-40 w-1 -translate-y-1/2 overflow-hidden rounded-full bg-gray-200/80 transition-all duration-200 dark:bg-gray-700/80 ${
+          className={`fixed right-3 top-1/2 z-20 h-40 w-1 -translate-y-1/2 overflow-hidden rounded-full bg-library-edge/80 transition-all duration-200 dark:bg-library-night-edge/80 ${
             controlsVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
           }`}
         >
           <div
-            className='absolute bottom-0 left-0 w-full rounded-full bg-sky-500 transition-all'
+            className='absolute bottom-0 left-0 w-full rounded-full bg-library-ochre transition-all dark:bg-library-night-ochre'
             style={{ height: `${progress}%` }}
           />
         </div>
 
         {pages.length > 0 && (
-          <div className='pointer-events-none fixed bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/15 px-2 py-0.5 text-sm font-medium text-white/90 backdrop-blur-sm dark:bg-white/10 dark:text-white/85'>
+          <button
+            type='button'
+            onClick={(event) => {
+              event.stopPropagation();
+              openJumpDialog();
+            }}
+            className={cn(
+              'fixed bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-full px-2.5 py-0.5 text-sm font-medium',
+              pages.length > 1 ? 'cursor-pointer' : 'pointer-events-none',
+              READER_HUD
+            )}
+          >
             {Math.min(activePage + 1, pages.length)}/{pages.length}
-          </div>
+          </button>
         )}
 
         {pages.length === 0 && <MangaReadSkeleton readMode={readMode} pageGap={pageGap} />}
@@ -902,7 +1176,10 @@ export default function MangaReadPage() {
                   verticalPageRefs.current[index] = node;
                 }}
                 data-index={index}
-                className='overflow-hidden bg-gray-100 shadow-sm dark:bg-gray-900'
+                className={cn(
+                  'scroll-mt-[calc(3.5rem+env(safe-area-inset-top))] overflow-hidden shadow-sm sm:scroll-mt-[calc(4rem+env(safe-area-inset-top))]',
+                  READER_CANVAS
+                )}
               >
                 <ProxyImage
                   originalSrc={page}
@@ -913,6 +1190,12 @@ export default function MangaReadPage() {
                 />
               </div>
             ))}
+            <ChapterEndActions
+              nextHref={nextChapter ? buildChapterHref(nextChapter) : null}
+              nextName={nextChapter?.name || ''}
+              detailHref={buildDetailHref()}
+              className='px-4 py-8'
+            />
           </div>
         ) : readMode === 'horizontal' ? (
           <div
@@ -922,7 +1205,7 @@ export default function MangaReadPage() {
           >
             {pages.map((page, index) => (
                 <div key={`${page}-${index}`} className='flex min-w-full snap-center items-center justify-center px-1'>
-                  <div className='w-full overflow-hidden bg-gray-100 shadow-sm dark:bg-gray-900'>
+                  <div className={cn('w-full overflow-hidden shadow-sm', READER_CANVAS)}>
                   <ProxyImage
                     originalSrc={page}
                     alt={`${chapterName}-${index + 1}`}
@@ -932,6 +1215,14 @@ export default function MangaReadPage() {
                 </div>
               </div>
             ))}
+            <div className='flex min-w-full snap-center items-center justify-center px-1'>
+              <ChapterEndActions
+                nextHref={nextChapter ? buildChapterHref(nextChapter) : null}
+                nextName={nextChapter?.name || ''}
+                detailHref={buildDetailHref()}
+                className='w-full'
+              />
+            </div>
           </div>
         ) : (
           <div className='flex min-h-[calc(100vh-8rem)] items-center justify-center'>
@@ -939,7 +1230,7 @@ export default function MangaReadPage() {
               {pagedItems.map((page, index) => (
                 <div
                   key={`${page}-${index}`}
-                  className='overflow-hidden bg-gray-100 shadow-sm dark:bg-gray-900'
+                  className={cn('overflow-hidden shadow-sm', READER_CANVAS)}
                 >
                   <ProxyImage
                     originalSrc={page}
@@ -950,7 +1241,7 @@ export default function MangaReadPage() {
                 </div>
               ))}
               {readMode === 'double' && pagedItems.length === 1 && (
-                <div className='hidden rounded-[24px] bg-transparent md:block' />
+                <div className='hidden md:block' />
               )}
             </div>
           </div>
@@ -958,7 +1249,7 @@ export default function MangaReadPage() {
       </div>
 
       <Link
-        href={`/manga/detail?mangaId=${mangaId}&sourceId=${sourceId}&title=${encodeURIComponent(title)}&cover=${encodeURIComponent(cover)}&sourceName=${encodeURIComponent(sourceName)}&returnTo=${encodeURIComponent(returnTo)}`}
+        href={buildDetailHref()}
         className='sr-only'
       >
         返回详情

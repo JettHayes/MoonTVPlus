@@ -151,6 +151,11 @@ class WatchRoomServer {
             console.log(`[WatchRoom] Owner ${data.userName} reconnected to room ${data.roomId}`);
           }
 
+          // 房主本人（未携带房主令牌）：直接拒绝加入自己的房间，避免以房员身份加入
+          if (!isOwner && data.userName && data.userName === room.ownerName) {
+            return callback({ success: false, error: '你是该房间房主，无法通过邀请链接加入' });
+          }
+
           // 取消房间的删除定时器（如果有人重连）
           if (this.roomDeletionTimers.has(data.roomId)) {
             console.log(`[WatchRoom] Cancelling deletion timer for room ${data.roomId}`);
@@ -202,7 +207,7 @@ class WatchRoomServer {
 
       // 离开房间
       socket.on('room:leave', () => {
-        this.handleLeaveRoom(socket);
+        this.handleLeaveRoom(socket, true);
       });
 
       // 获取房间列表
@@ -289,6 +294,16 @@ class WatchRoomServer {
         } else {
           console.log('[WatchRoom] Room not found for play:change');
         }
+      });
+
+      // 房主离开播放页面（SPA 导航，连接仍保持）：通知房员暂停并提示，
+      // 房主回到播放页后周期广播会自动恢复同步（不清除 currentState，房员重进播放页仍可跳转回房主视频）
+      socket.on('play:owner-leave', () => {
+        const roomInfo = this.socketToRoom.get(socket.id);
+        if (!roomInfo || !roomInfo.isOwner) return;
+
+        console.log(`[WatchRoom] Owner left play page, notifying room ${roomInfo.roomId}`);
+        socket.to(roomInfo.roomId).emit('play:owner-left');
       });
 
       // 切换直播频道
@@ -584,12 +599,12 @@ class WatchRoomServer {
             }
           }
         }
-        this.handleLeaveRoom(socket);
+        this.handleLeaveRoom(socket, false);
       });
     });
   }
 
-  handleLeaveRoom(socket) {
+  handleLeaveRoom(socket, isExplicitLeave = false) {
     const roomInfo = this.socketToRoom.get(socket.id);
     if (!roomInfo) return;
 
@@ -607,8 +622,9 @@ class WatchRoomServer {
 
       socket.to(roomId).emit('room:member-left', userId);
 
-      // 如果是房主主动离开，解散房间并踢出所有成员
-      if (isOwner) {
+      // 房主主动离开（room:leave）：立即解散房间并踢出所有成员
+      // 房主断线（disconnect/刷新/网络闪断）：保留房间等待重连，由清理定时器兜底删除
+      if (isOwner && isExplicitLeave) {
         console.log(`[WatchRoom] Owner actively left room ${roomId}, disbanding room`);
 
         // 通知所有成员房间被解散
@@ -629,7 +645,11 @@ class WatchRoomServer {
           this.roomDeletionTimers.delete(roomId);
         }
       } else {
-        // 普通成员离开，房间为空时延迟删除
+        if (isOwner) {
+          console.log(`[WatchRoom] Owner disconnected from room ${roomId}, waiting for reconnect`);
+        }
+
+        // 普通成员离开，或房主断线：房间为空时延迟删除
         if (roomMembers.size === 0) {
           console.log(`[WatchRoom] Room ${roomId} is now empty, will delete in 30 seconds if no one rejoins`);
 

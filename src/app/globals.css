@@ -262,13 +262,13 @@ div[data-media-provider] video {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #0284c7;
+  color: #a8611f;
   animation: reader-book-flip 1.5s ease-in-out infinite;
   transform-origin: center;
 }
 
 .dark .reader-book-loader {
-  color: #38bdf8;
+  color: #d9924a;
 }
 
 
@@ -332,5 +332,876 @@ div[data-media-provider] video {
   .tv-focusable:focus-visible,
   .tv-focused {
     transition: none;
+  }
+}
+
+/* 骨架屏微光动画与配色变量 - 原为 ImagePlaceholder 的内联 <style>，
+   提升为全局单例：此前每个实例都会重复输出一份 keyframes 与 :root 变量。
+   改为只跟随 .dark 类，不再跟随系统偏好，避免 hydration 前闪错配色。 */
+@keyframes shine {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+:root {
+  --skeleton-color: #f0f0f0;
+  --skeleton-highlight: #e0e0e0;
+}
+
+.dark {
+  --skeleton-color: #2d2d2d;
+  --skeleton-highlight: #3d3d3d;
+}
+
+/* ============================================================
+   初始化加载样式（后台「个性化配置 → 初始化加载样式」可切换）
+   html[data-loading-style] 由 layout.tsx 在服务端写入；播放页/直播页
+   同时渲染三种款式，靠下面的规则只显示选中的一种。这样首帧就是正确款式，
+   不会出现「先闪一下旧版再换成二次元」，也没有 hydration 不匹配。
+   ============================================================ */
+.mtv-load {
+  display: none;
+}
+html[data-loading-style='grid'] .mtv-load-grid,
+html[data-loading-style='talisman'] .mtv-load-talisman,
+html[data-loading-style='classic'] .mtv-load-classic,
+html:not([data-loading-style]) .mtv-load-talisman {
+  display: block;
+}
+
+/* 主题色与墨色，两种款式共用 */
+.mtv-load-grid,
+.mtv-load-talisman {
+  --mtv-acc: var(--theme-primary, #10b981);
+  --mtv-acc-hover: var(--theme-primary-hover, #059669);
+  --mtv-ink: #1c1c22;
+  --mtv-done: #2563eb; /* 方格里「已完成」的填色，刻意不跟主题色同色系 */
+  --mtv-surface: rgba(255, 255, 255, 0.94);
+}
+.dark .mtv-load-grid,
+.dark .mtv-load-talisman {
+  --mtv-ink: #ececf4;
+  --mtv-done: #3b82f6;
+  --mtv-surface: rgba(24, 24, 32, 0.94);
+}
+
+/* ---------------- ① 方格 ---------------- */
+.mtv-grid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+.mtv-grid-panels {
+  display: flex;
+  gap: 10px;
+}
+.mtv-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 64px;
+  height: 64px;
+  border: 2.5px solid var(--mtv-ink);
+  border-radius: 3px;
+  /* 不能裁切：进行中的光环/光点要能扩到格子外面 */
+  transition:
+    background 0.45s ease,
+    transform 0.34s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.mtv-panel svg {
+  width: 22px;
+  height: 22px;
+  color: var(--mtv-ink);
+  opacity: 0.22;
+  transition:
+    color 0.35s,
+    opacity 0.35s;
+}
+.mtv-panel span {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--mtv-ink);
+  opacity: 0.22;
+  transition:
+    color 0.35s,
+    opacity 0.35s;
+}
+/* 已完成：整格填蓝，白图标 */
+.mtv-panel.on {
+  background: var(--mtv-done);
+}
+.mtv-panel.on svg,
+.mtv-panel.on span {
+  color: #fff;
+  opacity: 1;
+}
+/* 进行中：主题色渐变 + 上下漂浮（写在 .on 之后，覆盖掉填墨） */
+.mtv-panel.cur {
+  background: linear-gradient(150deg, var(--mtv-acc), var(--mtv-acc-hover));
+  animation: mtv-float 1.5s ease-in-out infinite;
+}
+.mtv-panel.cur svg,
+.mtv-panel.cur span {
+  color: #fff;
+}
+@keyframes mtv-float {
+  0%,
+  100% {
+    transform: translateY(-4px) rotate(-2.5deg);
+  }
+  50% {
+    transform: translateY(-15px) rotate(-2.5deg);
+  }
+}
+/* 向外扩散的光环：跟格子同形的圆角方框，边扩大边淡出 */
+.mtv-panel.cur::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 7px;
+  border: 2px solid var(--mtv-acc);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--mtv-acc) 70%, transparent);
+  pointer-events: none;
+  animation: mtv-spark-ring 1.5s ease-out infinite;
+}
+@keyframes mtv-spark-ring {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.9);
+  }
+  75%,
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+/* 向外迸出的光点：八个点（四边 + 四角）边外扩边闪灭 */
+.mtv-panel.cur::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 9px;
+  background:
+    radial-gradient(circle at 50% 0, var(--mtv-acc) 1.6px, transparent 2.4px),
+    radial-gradient(circle at 100% 50%, var(--mtv-acc) 1.6px, transparent 2.4px),
+    radial-gradient(circle at 50% 100%, var(--mtv-acc) 1.6px, transparent 2.4px),
+    radial-gradient(circle at 0 50%, var(--mtv-acc) 1.6px, transparent 2.4px),
+    radial-gradient(circle at 0 0, var(--mtv-acc) 1.3px, transparent 2px),
+    radial-gradient(circle at 100% 0, var(--mtv-acc) 1.3px, transparent 2px),
+    radial-gradient(circle at 0 100%, var(--mtv-acc) 1.3px, transparent 2px),
+    radial-gradient(circle at 100% 100%, var(--mtv-acc) 1.3px, transparent 2px);
+  pointer-events: none;
+  animation: mtv-spark-dots 1.5s ease-out 0.3s infinite;
+}
+@keyframes mtv-spark-dots {
+  0% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+}
+.mtv-panel.cur svg {
+  animation: mtv-icon-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes mtv-icon-pop {
+  0% {
+    transform: scale(0.5) rotate(-16deg);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.22) rotate(6deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+
+.mtv-bubble {
+  position: relative;
+  max-width: 300px;
+  margin: 0;
+  padding: 10px 17px;
+  border: 2.5px solid var(--mtv-ink);
+  border-radius: 14px;
+  background: var(--mtv-surface);
+  color: var(--mtv-ink);
+  font-size: 15px;
+  font-weight: 800;
+  /* 失败态文案可能很长（透传的 Error message），别撑破气泡 */
+  overflow-wrap: anywhere;
+  transform: rotate(-1.2deg);
+  box-shadow: 3px 3px 0 var(--mtv-ink);
+}
+.mtv-bubble::before,
+.mtv-bubble::after {
+  content: '';
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+.mtv-bubble::before {
+  top: -12px;
+  left: 28px;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-bottom: 12px solid var(--mtv-ink);
+}
+.mtv-bubble::after {
+  top: -7.5px;
+  left: 30.5px;
+  border-left: 7.5px solid transparent;
+  border-right: 7.5px solid transparent;
+  border-bottom: 9px solid var(--mtv-surface);
+}
+
+/* ---------------- ② 符阵 ---------------- */
+.mtv-tal {
+  /* 阵盘直径。其余尺寸都按 150px 的原始比例推导，改这一个值即可整体缩放 */
+  --mtv-tal-s: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+  /* 阵心的柔光底；底色透明，让站点背景透出来 */
+  background: radial-gradient(
+    70% 70% at 50% 40%,
+    color-mix(in srgb, var(--mtv-acc) 13%, transparent),
+    transparent 70%
+  );
+}
+.mtv-tal-circle {
+  position: relative;
+  width: var(--mtv-tal-s);
+  height: var(--mtv-tal-s);
+}
+.mtv-tal-ring {
+  position: absolute;
+  border-radius: 50%;
+}
+/* 细密刻度环：conic-gradient 出刻度，再用 mask 抠成细环 */
+.mtv-tal-ticks {
+  inset: 0;
+  background: repeating-conic-gradient(
+    from 0deg,
+    var(--mtv-acc) 0 0.7deg,
+    transparent 0.7deg 15deg
+  );
+  -webkit-mask: radial-gradient(circle, transparent 62%, #000 63% 70%, transparent 71%);
+  mask: radial-gradient(circle, transparent 62%, #000 63% 70%, transparent 71%);
+  animation: mtv-spin 26s linear infinite;
+}
+/* 粗刻度环，反向 */
+.mtv-tal-dash {
+  inset: calc(var(--mtv-tal-s) * 13 / 150);
+  background: repeating-conic-gradient(
+    from 0deg,
+    var(--mtv-acc-hover) 0 7deg,
+    transparent 7deg 18deg
+  );
+  -webkit-mask: radial-gradient(circle, transparent 78%, #000 79% 86%, transparent 87%);
+  mask: radial-gradient(circle, transparent 78%, #000 79% 86%, transparent 87%);
+  animation: mtv-spin 17s linear infinite reverse;
+}
+/* 细线圆 */
+.mtv-tal-line {
+  inset: calc(var(--mtv-tal-s) * 25 / 150);
+  border: calc(var(--mtv-tal-s) * 1.5 / 150) solid var(--mtv-acc-hover);
+  opacity: 0.5;
+}
+/* 六芒星 */
+.mtv-tal-star {
+  position: absolute;
+  inset: calc(var(--mtv-tal-s) * 23 / 150);
+  animation: mtv-spin 34s linear infinite;
+}
+.mtv-tal-star polygon {
+  fill: none;
+  stroke: var(--mtv-acc);
+  stroke-width: 1.4;
+  opacity: 0.7;
+}
+/* 呼吸光晕 */
+.mtv-tal-glow {
+  inset: calc(var(--mtv-tal-s) * 14 / 150);
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--mtv-acc) 45%, transparent),
+    transparent 66%
+  );
+  animation: mtv-breathe 3s ease-in-out infinite;
+}
+@keyframes mtv-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 0.92;
+    transform: scale(1.06);
+  }
+}
+@keyframes mtv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* 十六字卦位 */
+.mtv-tal-runes {
+  position: absolute;
+  inset: 0;
+  animation: mtv-spin 44s linear infinite;
+}
+.mtv-rune {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin: calc(var(--mtv-tal-s) * -8 / 150) 0 0 calc(var(--mtv-tal-s) * -6 / 150);
+  font-family: Georgia, 'Songti SC', 'Noto Serif CJK SC', 'Noto Serif SC', STSong,
+    SimSun, serif;
+  font-size: calc(var(--mtv-tal-s) * 12 / 150);
+  font-weight: 600;
+  color: var(--mtv-acc-hover);
+  opacity: 0.26;
+  transform: rotate(var(--a)) translateY(calc(var(--mtv-tal-s) * -63 / 150))
+    rotate(calc(-1 * var(--a)));
+  transition:
+    opacity 0.4s,
+    color 0.4s,
+    text-shadow 0.4s;
+}
+.mtv-rune.lit {
+  opacity: 1;
+  color: var(--mtv-acc);
+  text-shadow: 0 0 calc(var(--mtv-tal-s) * 9 / 150)
+    color-mix(in srgb, var(--mtv-acc) 85%, transparent);
+}
+/* 上升光点 */
+.mtv-mote {
+  position: absolute;
+  bottom: 16%;
+  border-radius: 50%;
+  background: var(--mtv-acc);
+  box-shadow: 0 0 14px 3px color-mix(in srgb, var(--mtv-acc) 70%, transparent);
+  animation: mtv-rise linear infinite;
+  pointer-events: none;
+}
+@keyframes mtv-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.6);
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(calc(var(--mtv-tal-s) * -140 / 150)) scale(1.1);
+  }
+}
+/* 换阶段时炸开的圆环 */
+.mtv-tal-flash {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: calc(var(--mtv-tal-s) * 2 / 150) solid var(--mtv-acc);
+  opacity: 0;
+  pointer-events: none;
+}
+.mtv-tal-flash.go {
+  animation: mtv-flashring 0.7s ease-out;
+}
+@keyframes mtv-flashring {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.5);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+/* 阵心图标：白色描边 + 主题色辉光，底下不垫色块 */
+.mtv-tal-core {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mtv-tal-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--mtv-tal-s) * 40 / 150);
+  height: calc(var(--mtv-tal-s) * 40 / 150);
+  color: #fff;
+  filter: drop-shadow(0 0 18px var(--mtv-acc));
+}
+.mtv-tal-icon svg {
+  width: 100%;
+  height: 100%;
+}
+.mtv-tal-icon.pop {
+  animation: mtv-icon-pop2 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes mtv-icon-pop2 {
+  0% {
+    transform: scale(0.3) rotate(-25deg);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.25) rotate(8deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+/* 文案 + 底部细进度条 */
+.mtv-tal-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  text-align: center;
+}
+.mtv-tal-phrase {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--mtv-ink);
+}
+/* 轨道是主题色的淡影，填充是同色深浅渐变。宽度按阵盘比例推，但先撞容器宽度，
+   窄屏（fixed 铺满、左右各留 24px）上不会顶出去。 */
+.mtv-tal-bar {
+  width: 100%;
+  max-width: calc(var(--mtv-tal-s) * 200 / 150);
+  height: calc(var(--mtv-tal-s) * 3 / 150);
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--mtv-acc) 22%, transparent);
+}
+/* 脉冲：一个 1.2s 的心跳里，一段亮光在填充内从左往右游过去（mtv-tal-flow），
+   整条同时「攒力」亮起来、在光游到头部时最盛（mtv-tal-charge）。两个动画共用
+   周期，天然同相，不必靠 delay。光只在填充段里走 —— 不越出前沿。 */
+.mtv-tal-bar i {
+  position: relative;
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  /* 下游光段就靠这层裁切，才会「从左边冒出来、到头部消失」而不越界 */
+  overflow: hidden;
+  background: linear-gradient(90deg, var(--mtv-acc-hover), var(--mtv-acc));
+  transition: width 0.9s cubic-bezier(0.22, 0.61, 0.36, 1);
+  animation: mtv-tal-charge 1.2s ease-in-out infinite;
+}
+/* 线内流光：头尾透明的渐变，亮端在前，看着是一段游走的光而不是挪动的色块。
+   起点整段落在填充左侧之外（left: -55%），终点整段越过头部，两端都由
+   overflow 裁掉，所以只在条内可见，来回都不露头。 */
+.mtv-tal-bar i::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -55%;
+  width: 55%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--mtv-acc) 45%, #fff)
+  );
+  animation: mtv-tal-flow 1.2s linear infinite;
+}
+@keyframes mtv-tal-charge {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  55% {
+    filter: brightness(1.4);
+  }
+  80% {
+    filter: brightness(1.06);
+  }
+}
+@keyframes mtv-tal-flow {
+  0% {
+    transform: translateX(0);
+  }
+  /* 元素宽是填充的 55%，要走完「自身 + 整条填充」= 100%/55% ≈ 282% 自身宽 */
+  58%,
+  100% {
+    transform: translateX(282%);
+  }
+}
+
+/* ---------------- ③ 符阵·坏死（失败态） ----------------
+   同一个阵，但「活着」的东西全抽掉了：自转、呼吸、光点、闪现一律停，
+   主题色换成黑魔法的深紫，阵心压一团化不开的紫雾，
+   只有失败前亮过的几个卦位还烧着一点幽绿。 */
+.mtv-tal-dead {
+  --mtv-acc: #5b21b6;
+  --mtv-acc-hover: #4c1d95;
+  --mtv-tal-ember: #4d7c0f;
+  --mtv-tal-fog: rgba(46, 16, 101, 0.55);
+  /* 失败页还要放标题、报错、按钮，阵盘收小一号免得整页被顶下去 */
+  --mtv-tal-s: 220px;
+}
+.dark .mtv-tal-dead {
+  --mtv-acc: #8b5cf6;
+  --mtv-acc-hover: #7c3aed;
+  --mtv-tal-ember: #84cc16;
+  --mtv-tal-fog: rgba(88, 28, 135, 0.6);
+}
+.mtv-tal-dead .mtv-tal-ticks,
+.mtv-tal-dead .mtv-tal-dash,
+.mtv-tal-dead .mtv-tal-star,
+.mtv-tal-dead .mtv-tal-runes,
+.mtv-tal-dead .mtv-tal-glow {
+  animation: none;
+}
+/* 光晕不再是发亮的环，变成阵心化不开的紫雾 */
+.mtv-tal-dead .mtv-tal-glow {
+  background: radial-gradient(circle, var(--mtv-tal-fog), transparent 66%);
+  opacity: 0.9;
+}
+.mtv-tal-dead .mtv-tal-line {
+  opacity: 0.22;
+}
+.mtv-tal-dead .mtv-rune {
+  opacity: 0.14;
+}
+/* 余烬：失败前点亮的卦位，冷却成幽绿 */
+.mtv-rune.ember {
+  opacity: 0.85;
+  color: var(--mtv-tal-ember);
+  text-shadow: 0 0 calc(var(--mtv-tal-s) * 9 / 150)
+    color-mix(in srgb, var(--mtv-tal-ember) 80%, transparent);
+}
+/* 阵心不再是发光的图标，只剩一枚熄灭的警告 */
+.mtv-tal-dead .mtv-tal-icon {
+  color: var(--mtv-tal-ember);
+  filter: none;
+  opacity: 0.9;
+}
+
+/* ---------------- ④ 方格·本话到此为止（失败态） ----------------
+   四格统一褪成灰蓝，不漂浮不闪光，停在失败那一格换成 ✕。 */
+.mtv-grid-dead {
+  --mtv-dead-fill: #64748b;
+}
+.dark .mtv-grid-dead {
+  --mtv-dead-fill: #475569;
+}
+.mtv-grid-dead .mtv-panel {
+  background: var(--mtv-dead-fill);
+  border-color: var(--mtv-dead-fill);
+}
+.mtv-grid-dead .mtv-panel svg,
+.mtv-grid-dead .mtv-panel span {
+  color: #fff;
+  opacity: 1;
+}
+
+/* 失败态图标：换过做法的款式各自接管，只有旧版继续用 emoji 图标。
+   方格还把文案搬进了对话框，红框里那句同样的话就不必再来一遍。 */
+html[data-loading-style='talisman'] .mtv-err-legacy,
+html[data-loading-style='grid'] .mtv-err-legacy,
+html[data-loading-style='grid'] .mtv-err-box {
+  display: none;
+}
+
+/* ---------------- ⑤ 播放器遮罩里的同款 ----------------
+   蒙层底色是 black/85，明暗两套里只有暗色那套看得见，所以这里钉死暗色，
+   不跟站点主题开关走；阵也收小一号，免得顶出 300px 高的移动端播放器。 */
+.mtv-on-dark.mtv-load-grid,
+.mtv-on-dark.mtv-load-talisman {
+  --mtv-ink: #ececf4;
+  --mtv-done: #3b82f6;
+  --mtv-surface: rgba(24, 24, 32, 0.94);
+}
+/* 移动端播放器只有 300px 高，底座得收着放，否则整块会溢到画面外面 */
+.mtv-on-dark .mtv-tal {
+  --mtv-tal-s: 116px;
+  gap: 12px;
+}
+/* 失败态底下还压着标题和按钮，阵再收一号 */
+.mtv-on-dark .mtv-tal-dead {
+  --mtv-tal-s: 88px;
+}
+.mtv-on-dark .mtv-grid {
+  gap: 12px;
+}
+.mtv-on-dark .mtv-panel {
+  width: 46px;
+  height: 46px;
+}
+.mtv-on-dark .mtv-panel svg {
+  width: 18px;
+  height: 18px;
+}
+.mtv-on-dark .mtv-bubble {
+  max-width: 260px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+@media (min-width: 1024px) {
+  .mtv-on-dark .mtv-tal {
+    --mtv-tal-s: 218px;
+    gap: 18px;
+  }
+  .mtv-on-dark .mtv-tal-dead {
+    --mtv-tal-s: 176px;
+  }
+  .mtv-on-dark .mtv-grid {
+    gap: 24px;
+  }
+  .mtv-on-dark .mtv-panel {
+    width: 64px;
+    height: 64px;
+  }
+  .mtv-on-dark .mtv-panel svg {
+    width: 22px;
+    height: 22px;
+  }
+  .mtv-on-dark .mtv-bubble {
+    max-width: 300px;
+    padding: 10px 17px;
+    font-size: 15px;
+  }
+}
+
+/* 加载遮罩用 fixed 铺满整个视口，桌面端要把左侧固定侧边栏的宽度让出来，
+   否则内容会按「含侧边栏的整屏」居中，看起来偏左。左偏移跟随侧边栏展开/收起：
+   Sidebar 收起时会在 <html> 上写 data-sidebar-collapsed。移动端无侧边栏，不偏移。 */
+@media (min-width: 768px) {
+  .mtv-load-overlay {
+    left: 16rem; /* 侧边栏展开 = w-64 */
+  }
+  html[data-sidebar-collapsed] .mtv-load-overlay {
+    left: 4rem; /* 侧边栏收起 = w-16 */
+  }
+}
+
+/* 方格款在 PC（≥1024）整体放大 2.5 倍：只放大铺满整屏的加载页那一版，
+   播放器内的深色小图标（.mtv-on-dark）保持原样。用 transform 统一缩放，
+   连描边、光环、光点、漂浮位移一起等比放大，不必逐个改尺寸。 */
+@media (min-width: 1024px) {
+  .mtv-load-grid:not(.mtv-on-dark) .mtv-grid {
+    transform: scale(2.5);
+  }
+}
+
+/* ==================================================================
+   评分星标徽章：视频卡片右上角，锦旗(flag)/勋章(medal) 两款
+   分档配色：hi 高分暖金发光 / mid 主题色 / lo 低分冷灰
+   ================================================================== */
+.mtv-rate {
+  /* 分档色板：mid 走主题色并写死兜底（默认主题变量为空） */
+  --rate-hi-a: #ffd54a;
+  --rate-hi-b: #ff8a3d;
+  --rate-hi-ink: #4a2600;
+  --rate-mid-a: var(--theme-primary, #ec4899);
+  --rate-mid-b: var(--theme-primary-hover, #d6559a);
+  --rate-mid-ink: #ffffff;
+  --rate-lo-a: #9fb0cc;
+  --rate-lo-b: #6b7d9e;
+  --rate-lo-ink: #20283a;
+  font-variant-numeric: tabular-nums;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.mtv-rate svg {
+  display: block;
+}
+
+/* ---------------- 锦旗 flag：从顶边垂下的燕尾旗 ---------------- */
+.mtv-rate-flag {
+  position: absolute;
+  top: 0;
+  right: 8px;
+  z-index: 3;
+  width: 34px;
+  padding: 6px 0 14px;
+  text-align: center;
+  color: #fff;
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 1;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 84%, 0 100%);
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.35));
+  transition: filter 0.3s ease-out;
+}
+.mtv-rate-flag .mtv-rate-stars {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  margin-bottom: 3px;
+}
+.mtv-rate-flag .mtv-rate-stars svg {
+  width: 8px;
+  height: 8px;
+}
+.mtv-rate-flag.hi {
+  background: linear-gradient(180deg, var(--rate-hi-a), var(--rate-hi-b));
+  color: var(--rate-hi-ink);
+  filter: drop-shadow(0 0 6px rgba(255, 170, 60, 0.85))
+    drop-shadow(0 3px 5px rgba(0, 0, 0, 0.35));
+}
+.mtv-rate-flag.hi .mtv-rate-stars svg {
+  fill: var(--rate-hi-ink);
+}
+.mtv-rate-flag.mid {
+  background: linear-gradient(180deg, var(--rate-mid-a), var(--rate-mid-b));
+  color: var(--rate-mid-ink);
+}
+.mtv-rate-flag.mid .mtv-rate-stars svg {
+  fill: var(--rate-mid-ink);
+}
+.mtv-rate-flag.lo {
+  background: linear-gradient(180deg, var(--rate-lo-a), var(--rate-lo-b));
+  color: var(--rate-lo-ink);
+}
+.mtv-rate-flag.lo .mtv-rate-stars svg {
+  fill: var(--rate-lo-ink);
+}
+.group:hover .mtv-rate-flag {
+  filter: drop-shadow(0 4px 7px rgba(0, 0, 0, 0.4));
+}
+.group:hover .mtv-rate-flag.hi {
+  filter: drop-shadow(0 0 9px rgba(255, 170, 60, 1))
+    drop-shadow(0 4px 7px rgba(0, 0, 0, 0.4));
+}
+
+/* ---------------- 勋章 medal：圆牌 + 双燕尾垂带，三星金字塔 ---------------- */
+.mtv-rate-medal {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  z-index: 3;
+  width: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  filter: drop-shadow(0 3px 5px rgba(0, 0, 0, 0.35));
+  transition: filter 0.3s ease-out;
+}
+.mtv-rate-medal .mtv-rate-ribbons {
+  position: relative;
+  width: 26px;
+  height: 20px;
+  margin-bottom: -9px;
+}
+.mtv-rate-medal .mtv-rate-ribbons i {
+  position: absolute;
+  top: 0;
+  width: 11px;
+  height: 20px;
+  display: block;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%);
+}
+.mtv-rate-medal .mtv-rate-ribbons i.l {
+  left: 1px;
+  transform: rotate(-6deg);
+}
+.mtv-rate-medal .mtv-rate-ribbons i.r {
+  right: 1px;
+  transform: rotate(6deg);
+}
+.mtv-rate-medal .mtv-rate-disc {
+  position: relative;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 800;
+  font-size: 12px;
+  line-height: 1;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+}
+.mtv-rate-medal .mtv-rate-stars {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 1px;
+}
+.mtv-rate-medal .mtv-rate-stars .srow {
+  display: flex;
+  gap: 1px;
+}
+.mtv-rate-medal .mtv-rate-stars svg {
+  width: 6px;
+  height: 6px;
+}
+.mtv-rate-medal.hi .mtv-rate-disc {
+  background: linear-gradient(135deg, var(--rate-hi-a), var(--rate-hi-b));
+  color: var(--rate-hi-ink);
+  box-shadow: 0 0 14px 1px rgba(255, 170, 60, 0.7);
+}
+.mtv-rate-medal.hi .mtv-rate-ribbons i {
+  background: var(--rate-hi-b);
+}
+.mtv-rate-medal.hi .mtv-rate-stars svg {
+  fill: var(--rate-hi-ink);
+}
+.mtv-rate-medal.mid .mtv-rate-disc {
+  background: linear-gradient(135deg, var(--rate-mid-a), var(--rate-mid-b));
+  color: var(--rate-mid-ink);
+}
+.mtv-rate-medal.mid .mtv-rate-ribbons i {
+  background: var(--rate-mid-b);
+}
+.mtv-rate-medal.mid .mtv-rate-stars svg {
+  fill: var(--rate-mid-ink);
+}
+.mtv-rate-medal.lo .mtv-rate-disc {
+  background: linear-gradient(135deg, var(--rate-lo-a), var(--rate-lo-b));
+  color: var(--rate-lo-ink);
+}
+.mtv-rate-medal.lo .mtv-rate-ribbons i {
+  background: var(--rate-lo-b);
+}
+.mtv-rate-medal.lo .mtv-rate-stars svg {
+  fill: var(--rate-lo-ink);
+}
+.group:hover .mtv-rate-medal {
+  transform: scale(1.06);
+}
+
+/* 移动端：卡片小，整体缩小 20%，并再贴近右边缘一半 */
+@media (max-width: 639px) {
+  .mtv-rate-flag,
+  .mtv-rate-medal {
+    right: 2px;
+    transform: scale(0.8);
+    transform-origin: top center;
+  }
+  .group:hover .mtv-rate-medal {
+    transform: scale(0.85);
   }
 }

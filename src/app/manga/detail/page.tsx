@@ -1,45 +1,87 @@
 'use client';
 
-import { ArrowDownWideNarrow, ArrowUpWideNarrow, BookOpen, Clock3 } from 'lucide-react';
+import {
+  ArrowDownWideNarrow,
+  ArrowUpWideNarrow,
+  BookmarkCheck,
+  BookmarkPlus,
+  BookOpen,
+  Clock3,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { deleteMangaShelf, getAllMangaReadRecords, getAllMangaShelf, saveMangaShelf } from '@/lib/db.client';
-import { MangaChapter, MangaDetail, MangaReadRecord, MangaShelfItem } from '@/lib/manga.types';
+import { cn } from '@/lib/cn';
+import {
+  deleteMangaShelf,
+  getAllMangaReadRecords,
+  getAllMangaShelf,
+  saveMangaShelf,
+} from '@/lib/db.client';
+import {
+  MangaChapter,
+  MangaDetail,
+  MangaReadRecord,
+  MangaShelfItem,
+} from '@/lib/manga.types';
 
+import {
+  mangaReadHref,
+  mangaRecordReadHref,
+} from '@/components/media/adapters';
+import {
+  BOOK_COVER_LIFT,
+  BOOK_SPINE_OVERLAY,
+  LIBRARY_BUTTON,
+  LIBRARY_FOCUS,
+  LIBRARY_GHOST_BUTTON,
+  LIBRARY_MUTED,
+  LIBRARY_PANEL,
+  LIBRARY_ROW,
+  LIBRARY_ROW_ACTIVE,
+  LIBRARY_SERIF,
+  LIBRARY_SKELETON,
+  LIBRARY_TEXT,
+} from '@/components/media/library';
 import ProxyImage from '@/components/ProxyImage';
+
+const PANEL_CLASS = cn(LIBRARY_PANEL, 'p-6');
+
+/** 详情页里的元信息胶囊（作者 / 状态）。 */
+const META_PILL =
+  'rounded-sm bg-library-paper px-2.5 py-1 text-library-muted dark:bg-library-night dark:text-library-night-muted';
 
 function MangaDetailSkeleton() {
   return (
     <div className='space-y-6'>
-      <div className='grid gap-6 rounded-[28px] border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-950 md:grid-cols-[260px_1fr]'>
-        <div className='aspect-[3/4] animate-pulse rounded-3xl bg-gray-200 dark:bg-gray-800' />
+      <div className={cn('grid gap-6 md:grid-cols-[260px_1fr]', PANEL_CLASS)}>
+        <div className={cn('aspect-[3/4]', LIBRARY_SKELETON)} />
         <div className='space-y-4'>
-          <div className='h-8 w-2/3 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+          <div className={cn('h-8 w-2/3', LIBRARY_SKELETON)} />
           <div className='flex gap-2'>
-            <div className='h-7 w-24 animate-pulse rounded-full bg-gray-200 dark:bg-gray-800' />
-            <div className='h-7 w-20 animate-pulse rounded-full bg-gray-200 dark:bg-gray-800' />
+            <div className={cn('h-7 w-24 rounded-full', LIBRARY_SKELETON)} />
+            <div className={cn('h-7 w-20 rounded-full', LIBRARY_SKELETON)} />
           </div>
           <div className='space-y-3'>
-            <div className='h-4 w-full animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-            <div className='h-4 w-11/12 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-            <div className='h-4 w-4/5 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+            <div className={cn('h-4 w-full', LIBRARY_SKELETON)} />
+            <div className={cn('h-4 w-11/12', LIBRARY_SKELETON)} />
+            <div className={cn('h-4 w-4/5', LIBRARY_SKELETON)} />
           </div>
           <div className='flex flex-wrap gap-3'>
-            <div className='h-12 w-32 animate-pulse rounded-2xl bg-gray-200 dark:bg-gray-800' />
-            <div className='h-12 w-40 animate-pulse rounded-2xl bg-gray-200 dark:bg-gray-800' />
-            <div className='h-12 w-32 animate-pulse rounded-2xl bg-gray-200 dark:bg-gray-800' />
+            <div className={cn('h-11 w-32 rounded-md', LIBRARY_SKELETON)} />
+            <div className={cn('h-11 w-40 rounded-md', LIBRARY_SKELETON)} />
+            <div className={cn('h-11 w-32 rounded-md', LIBRARY_SKELETON)} />
           </div>
         </div>
       </div>
-      <div className='rounded-[28px] border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-950'>
-        <div className='mb-4 h-6 w-32 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-        <div className='space-y-3'>
+      <div className={PANEL_CLASS}>
+        <div className={cn('mb-4 h-6 w-32', LIBRARY_SKELETON)} />
+        <div className='space-y-2'>
           {Array.from({ length: 8 }).map((_, index) => (
-            <div key={index} className='rounded-2xl border border-gray-200 px-4 py-3 dark:border-gray-700'>
-              <div className='h-4 w-1/3 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-              <div className='mt-2 h-3 w-1/4 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
+            <div key={index} className={cn(LIBRARY_ROW, 'px-4 py-3')}>
+              <div className={cn('h-4 w-1/3', LIBRARY_SKELETON)} />
+              <div className={cn('mt-2 h-3 w-1/4', LIBRARY_SKELETON)} />
             </div>
           ))}
         </div>
@@ -100,8 +142,12 @@ export default function MangaDetailPage() {
       .then(setDetail)
       .catch(() => undefined);
 
-    getAllMangaReadRecords().then(setHistory).catch(() => undefined);
-    getAllMangaShelf().then(setShelf).catch(() => undefined);
+    getAllMangaReadRecords()
+      .then(setHistory)
+      .catch(() => undefined);
+    getAllMangaShelf()
+      .then(setShelf)
+      .catch(() => undefined);
   }, [mangaId, searchParams, sourceId]);
 
   const chapters = useMemo(() => {
@@ -125,12 +171,21 @@ export default function MangaDetailPage() {
   const unreadChapterCount = shelf[key]?.unreadChapterCount || 0;
   const newChapterIds = useMemo(() => {
     if (unreadChapterCount <= 0) return new Set<string>();
-    return new Set(chronologicalChapters.slice(-unreadChapterCount).map((chapter) => chapter.id));
+    return new Set(
+      chronologicalChapters
+        .slice(-unreadChapterCount)
+        .map((chapter) => chapter.id)
+    );
   }, [chronologicalChapters, unreadChapterCount]);
 
   useEffect(() => {
     const shelfItem = shelf[key];
-    if (!detail || !shelfItem || !latestChapter || (shelfItem.unreadChapterCount || 0) <= 0) {
+    if (
+      !detail ||
+      !shelfItem ||
+      !latestChapter ||
+      (shelfItem.unreadChapterCount || 0) <= 0
+    ) {
       return;
     }
 
@@ -149,7 +204,15 @@ export default function MangaDetailPage() {
 
     // 只后台清零，当前页保留进入时看到的更新提示，刷新后再消失。
     saveMangaShelf(sourceId, mangaId, nextItem).catch(() => undefined);
-  }, [chronologicalChapters.length, detail, key, latestChapter, mangaId, shelf, sourceId]);
+  }, [
+    chronologicalChapters.length,
+    detail,
+    key,
+    latestChapter,
+    mangaId,
+    shelf,
+    sourceId,
+  ]);
 
   const toggleShelf = async () => {
     if (!detail) return;
@@ -185,90 +248,185 @@ export default function MangaDetailPage() {
   };
 
   const chapterHref = (chapter: MangaChapter) =>
-    `/manga/read?mangaId=${mangaId}&sourceId=${sourceId}&chapterId=${chapter.id}&title=${encodeURIComponent(detail?.title || '')}&cover=${encodeURIComponent(detail?.cover || '')}&sourceName=${encodeURIComponent(detail?.sourceName || '')}&chapterName=${encodeURIComponent(chapter.name)}&returnTo=${encodeURIComponent(returnTo)}`;
+    mangaReadHref(
+      {
+        mangaId,
+        sourceId,
+        chapterId: chapter.id,
+        title: detail?.title || '',
+        cover: detail?.cover || '',
+        sourceName: detail?.sourceName || '',
+        chapterName: chapter.name,
+      },
+      returnTo
+    );
 
   if (!detail) return <MangaDetailSkeleton />;
 
-
   return (
     <div className='space-y-6'>
-      <div className='grid gap-6 rounded-[28px] border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-950 md:grid-cols-[260px_1fr]'>
-        <div className='overflow-hidden rounded-3xl bg-gray-100 dark:bg-gray-800'>
+      <div className={cn('grid gap-6 md:grid-cols-[260px_1fr]', PANEL_CLASS)}>
+        {/* 封面立起来：外层投影 + 覆盖层书脊，和书墙上的卡片同一套。 */}
+        <div
+          className={cn(
+            'relative aspect-[3/4] overflow-hidden rounded-md bg-library-ochre-tint dark:bg-library-night-ochre-tint',
+            BOOK_COVER_LIFT
+          )}
+        >
           {detail.cover ? (
-            <ProxyImage originalSrc={detail.cover} alt={detail.title} className='h-full w-full object-cover' />
+            <>
+              <ProxyImage
+                originalSrc={detail.cover}
+                alt={detail.title}
+                className='h-full w-full object-cover'
+              />
+              <span className={BOOK_SPINE_OVERLAY} aria-hidden />
+            </>
           ) : (
-            <div className='flex aspect-[3/4] items-center justify-center text-sm text-gray-400'>暂无封面</div>
+            <div
+              className={cn(
+                'flex h-full flex-col items-center justify-center gap-2 text-sm',
+                LIBRARY_MUTED
+              )}
+            >
+              <BookOpen className='h-8 w-8' />
+              暂无封面
+            </div>
           )}
         </div>
         <div className='space-y-4'>
           <div>
-            <h1 className='text-3xl font-bold'>{detail.title}</h1>
-            <div className='mt-3 flex flex-wrap gap-2 text-xs text-gray-500'>
-              <span className='rounded-full bg-sky-50 px-3 py-1 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'>
+            <h1
+              className={cn(
+                'text-2xl font-semibold sm:text-3xl',
+                LIBRARY_TEXT,
+                LIBRARY_SERIF
+              )}
+            >
+              {detail.title}
+            </h1>
+            <div
+              className={cn('mt-3 flex flex-wrap gap-2 text-xs', LIBRARY_MUTED)}
+            >
+              <span className='rounded-sm bg-library-ochre-tint px-2.5 py-1 text-library-ochre dark:bg-library-night-ochre-tint dark:text-library-night-ochre'>
                 {detail.sourceName}
               </span>
-              {detail.author && <span className='rounded-full bg-gray-100 px-3 py-1 dark:bg-gray-800'>{detail.author}</span>}
-              {detail.status && <span className='rounded-full bg-gray-100 px-3 py-1 dark:bg-gray-800'>{detail.status}</span>}
+              {detail.author && (
+                <span className={META_PILL}>{detail.author}</span>
+              )}
+              {detail.status && (
+                <span className={META_PILL}>{detail.status}</span>
+              )}
             </div>
           </div>
-          {detail.description && <p className='text-sm leading-7 text-gray-600 dark:text-gray-300'>{detail.description}</p>}
+          {detail.description && (
+            <p className='text-sm leading-7 text-library-ink/80 dark:text-library-night-ink/80'>
+              {detail.description}
+            </p>
+          )}
           <div className='flex flex-wrap gap-3'>
             {chapters[0] && (
-              <Link href={chapterHref(chapters[0])} className='rounded-2xl bg-sky-600 px-5 py-3 text-sm font-medium text-white transition hover:bg-sky-700'>
-                <BookOpen className='mr-2 inline h-4 w-4' />开始阅读
+              <Link href={chapterHref(chapters[0])} className={LIBRARY_BUTTON}>
+                <BookOpen className='h-4 w-4' />
+                开始阅读
               </Link>
             )}
             {currentRecord && (
               <Link
-                href={`/manga/read?mangaId=${mangaId}&sourceId=${sourceId}&chapterId=${currentRecord.chapterId}&title=${encodeURIComponent(detail.title)}&cover=${encodeURIComponent(detail.cover)}&sourceName=${encodeURIComponent(detail.sourceName)}&chapterName=${encodeURIComponent(currentRecord.chapterName)}&returnTo=${encodeURIComponent(returnTo)}`}
-                className='rounded-2xl border border-sky-300 px-5 py-3 text-sm font-medium text-sky-700 transition hover:bg-sky-50 dark:text-sky-300 dark:hover:bg-sky-950/30'
+                href={mangaRecordReadHref(currentRecord, returnTo)}
+                className={LIBRARY_GHOST_BUTTON}
               >
-                <Clock3 className='mr-2 inline h-4 w-4' />继续阅读 第 {currentRecord.pageIndex + 1}/{currentRecord.pageCount} 页
+                <Clock3 className='h-4 w-4' />
+                继续阅读 第 {currentRecord.pageIndex + 1}/
+                {currentRecord.pageCount} 页
               </Link>
             )}
-            <button onClick={toggleShelf} className='rounded-2xl border border-gray-200 px-5 py-3 text-sm font-medium text-gray-700 transition hover:border-sky-300 hover:text-sky-600 dark:border-gray-700 dark:text-gray-200'>
+            <button
+              type='button'
+              onClick={toggleShelf}
+              aria-pressed={Boolean(shelf[key])}
+              className={cn(
+                LIBRARY_FOCUS,
+                'inline-flex items-center justify-center gap-2 rounded-md border px-4 py-2.5 text-sm font-medium transition-colors duration-200',
+                shelf[key]
+                  ? 'border-transparent bg-library-ochre-tint text-library-ochre hover:bg-library-ochre-tint/70 dark:bg-library-night-ochre-tint dark:text-library-night-ochre dark:hover:bg-library-night-ochre-tint/70'
+                  : 'border-library-edge text-library-ink hover:border-library-ochre hover:text-library-ochre dark:border-library-night-edge dark:text-library-night-ink dark:hover:border-library-night-ochre dark:hover:text-library-night-ochre'
+              )}
+            >
+              {shelf[key] ? (
+                <BookmarkCheck className='h-4 w-4' />
+              ) : (
+                <BookmarkPlus className='h-4 w-4' />
+              )}
               {shelf[key] ? '移出书架' : '加入书架'}
             </button>
           </div>
         </div>
       </div>
 
-      <div className='rounded-[28px] border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-950'>
-        <div className='mb-4 flex items-center justify-between'>
-          <h2 className='text-lg font-semibold'>章节列表</h2>
-          <button onClick={() => setDescOrder((prev) => !prev)} className='rounded-2xl border border-gray-200 px-4 py-2 text-sm dark:border-gray-700'>
-            {descOrder ? <ArrowDownWideNarrow className='inline h-4 w-4' /> : <ArrowUpWideNarrow className='inline h-4 w-4' />} {descOrder ? '倒序' : '正序'}
+      <div className={PANEL_CLASS}>
+        <div className='mb-4 flex items-center justify-between gap-3'>
+          <h2
+            className={cn('text-lg font-semibold', LIBRARY_TEXT, LIBRARY_SERIF)}
+          >
+            章节列表
+          </h2>
+          <button
+            type='button'
+            onClick={() => setDescOrder((prev) => !prev)}
+            aria-pressed={descOrder}
+            className={cn(LIBRARY_GHOST_BUTTON, 'gap-1.5 px-3 py-2 text-xs')}
+          >
+            {descOrder ? (
+              <ArrowDownWideNarrow className='h-4 w-4' />
+            ) : (
+              <ArrowUpWideNarrow className='h-4 w-4' />
+            )}
+            {descOrder ? '倒序' : '正序'}
           </button>
         </div>
         {unreadChapterCount > 0 && latestChapter && (
-          <div className='mb-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-300'>
+          <div className='mb-4 rounded-md border border-library-ochre/30 bg-library-ochre-tint px-4 py-3 text-sm text-library-ochre dark:border-library-night-ochre/30 dark:bg-library-night-ochre-tint dark:text-library-night-ochre'>
             已更新 {unreadChapterCount} 话，最新章节：{latestChapter.name}
           </div>
         )}
-        <div className='grid gap-3'>
+        <div className='grid gap-2'>
           {chapters.map((chapter) => {
             const active = currentRecord?.chapterId === chapter.id;
             const isNewChapter = newChapterIds.has(chapter.id);
+            const meta = formatChapterMeta(chapter);
+            const progress =
+              active && currentRecord
+                ? `上次看到第 ${currentRecord.pageIndex + 1} 页`
+                : null;
+
             return (
               <Link
                 key={chapter.id}
                 href={chapterHref(chapter)}
-                className={`rounded-2xl border px-4 py-3 text-sm transition ${active ? 'border-sky-400 bg-sky-50 dark:bg-sky-950/30' : isNewChapter ? 'border-emerald-300 bg-emerald-50/80 dark:border-emerald-800 dark:bg-emerald-950/20' : 'border-gray-200 hover:border-sky-300 dark:border-gray-700'}`}
+                className={cn(
+                  'rounded-md border px-4 py-3 text-sm transition-colors duration-200',
+                  LIBRARY_FOCUS,
+                  active
+                    ? LIBRARY_ROW_ACTIVE
+                    : cn(
+                        LIBRARY_ROW,
+                        'hover:border-library-ochre dark:hover:border-library-night-ochre'
+                      )
+                )}
               >
                 <div className='flex items-center justify-between gap-3'>
-                  <div className='font-medium text-gray-900 dark:text-gray-100'>{chapter.name}</div>
+                  <div className={cn('font-medium', LIBRARY_TEXT)}>
+                    {chapter.name}
+                  </div>
                   {isNewChapter && (
-                    <span className='rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-300'>
-                      NEW
+                    <span className='shrink-0 rounded-sm bg-library-ochre px-1.5 py-0.5 text-[11px] font-medium text-library-chip'>
+                      更新
                     </span>
                   )}
                 </div>
-                <div className='mt-1 text-xs text-gray-500'>
-                  {(() => {
-                    const meta = formatChapterMeta(chapter);
-                    const progress = active && currentRecord ? `上次看到第 ${currentRecord.pageIndex + 1} 页` : null;
-                    return [meta, progress].filter(Boolean).join(' · ');
-                  })()}
+                <div className={cn('mt-1 text-xs', LIBRARY_MUTED)}>
+                  {[meta, progress].filter(Boolean).join(' · ')}
                 </div>
               </Link>
             );

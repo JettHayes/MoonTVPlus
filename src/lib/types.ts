@@ -336,7 +336,7 @@ export interface SearchResult {
     sourceFormat?: string; // Emby 返回的原始字幕格式
     codec?: string;
     isExternal?: boolean;
-    renderMode?: 'native' | 'jassub';
+    renderMode?: 'native' | 'jassub' | 'bitsub';
   }>>; // 字幕列表（按集数索引）
   tmdb_id?: number; // TMDB ID
   rating?: number; // 评分

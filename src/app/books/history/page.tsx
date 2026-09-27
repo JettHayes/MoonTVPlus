@@ -9,7 +9,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -30,7 +30,34 @@ import {
   cacheBookReadRecord,
   cacheBookShelfItem,
 } from '@/lib/book-route-cache.client';
+import { cn } from '@/lib/cn';
 import { subscribeToDataUpdates } from '@/lib/db.client';
+import { processImageUrl } from '@/lib/utils';
+
+import EmptyState from '@/components/media/EmptyState';
+import {
+  LIBRARY_ACCENT_ICON,
+  LIBRARY_FOCUS,
+  LIBRARY_GHOST_BUTTON,
+  LIBRARY_ICON_BUTTON,
+  LIBRARY_ICON_BUTTON_DANGER,
+  LIBRARY_MUTED,
+  LIBRARY_PANEL,
+  LIBRARY_ROW,
+  LIBRARY_SERIF,
+  LIBRARY_TEXT,
+} from '@/components/media/library';
+import MediaGrid from '@/components/media/MediaGrid';
+import MediaGridSkeleton from '@/components/media/MediaGridSkeleton';
+import MediaPressCard from '@/components/media/MediaPressCard';
+
+/** 缓存面板里的一行（书名 + 大小 + 删除键）。 */
+const CARD_CLASS = cn(
+  LIBRARY_ROW,
+  'bg-library-card dark:bg-library-night-card'
+);
+const DANGER_BUTTON_CLASS =
+  'cursor-pointer rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors duration-200 hover:bg-red-700';
 
 function looksLikeInternalHref(value?: string) {
   if (!value) return false;
@@ -56,33 +83,8 @@ function formatBytes(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function BookHistorySkeleton() {
-  return (
-    <div className='space-y-4'>
-      {Array.from({ length: 6 }).map((_, index) => (
-        <div
-          key={index}
-          className='rounded-[2rem] border border-emerald-100/80 bg-white/85 p-4 shadow-sm shadow-emerald-950/5 dark:border-emerald-500/10 dark:bg-gray-950/70'
-        >
-          <div className='flex gap-4'>
-            <div className='h-28 w-20 animate-pulse overflow-hidden rounded-2xl bg-emerald-100 dark:bg-gray-800' />
-            <div className='min-w-0 flex-1 space-y-3'>
-              <div className='h-5 w-2/3 animate-pulse rounded bg-emerald-100 dark:bg-gray-800' />
-              <div className='h-4 w-1/3 animate-pulse rounded bg-emerald-100 dark:bg-gray-800' />
-              <div className='h-4 w-1/2 animate-pulse rounded bg-emerald-100 dark:bg-gray-800' />
-              <div className='flex gap-2 pt-1'>
-                <div className='h-9 w-20 animate-pulse rounded-2xl bg-emerald-100 dark:bg-gray-800' />
-                <div className='h-9 w-16 animate-pulse rounded-2xl bg-emerald-100 dark:bg-gray-800' />
-              </div>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export default function BookHistoryPage() {
+  const router = useRouter();
   const [records, setRecords] = useState<Record<string, BookReadRecord>>({});
   const [shelf, setShelf] = useState<Record<string, BookShelfItem>>({});
   const [loading, setLoading] = useState(true);
@@ -95,27 +97,17 @@ export default function BookHistoryPage() {
     key?: string;
     title?: string;
   } | null>(null);
-  const [displayAll, setDisplayAll] = useState(false);
-
-  const updateRecords = (nextRecords: Record<string, BookReadRecord>) => {
-    const count = Object.keys(nextRecords).length;
-    setRecords(nextRecords);
-    setDisplayAll(count <= 10);
-    if (count > 10) {
-      setTimeout(() => setDisplayAll(true), 0);
-    }
-  };
 
   useEffect(() => {
     setMounted(true);
     const cachedRecords = getCachedBookReadRecordsSnapshot();
     if (Object.keys(cachedRecords).length > 0) {
-      updateRecords(cachedRecords);
+      setRecords(cachedRecords);
       setLoading(false);
     }
 
     getAllBookReadRecords()
-      .then(updateRecords)
+      .then(setRecords)
       .catch(() => undefined)
       .finally(() => setLoading(false));
     getAllBookShelf()
@@ -124,7 +116,7 @@ export default function BookHistoryPage() {
 
     const unsubscribeHistory = subscribeToDataUpdates<
       Record<string, BookReadRecord>
-    >('bookHistoryUpdated', updateRecords);
+    >('bookHistoryUpdated', setRecords);
     return unsubscribeHistory;
   }, []);
 
@@ -165,150 +157,128 @@ export default function BookHistoryPage() {
         .sort((a, b) => b.saveTime - a.saveTime),
     [records, shelf]
   );
-  const visibleItems = useMemo(
-    () => (displayAll ? items : items.slice(0, 10)),
-    [displayAll, items]
-  );
 
   const cacheTotalSize = useMemo(
     () => cacheItems.reduce((sum, item) => sum + item.size, 0),
     [cacheItems]
   );
 
+  const handleDelete = async (item: (typeof items)[number]) => {
+    const [deleteSourceId = item.sourceId, deleteBookId = item.bookId] =
+      item.storageKey.split('+');
+    await deleteBookReadRecord(deleteSourceId, deleteBookId);
+    setRecords((prev) => {
+      const next = { ...prev };
+      delete next[item.storageKey];
+      return next;
+    });
+  };
+
+  /** 进阅读器之前先把记录和书架项写进路由缓存——阅读页靠它认书。 */
+  const rememberOpen = (item: (typeof items)[number]) => {
+    cacheBookReadRecord(item);
+    if (!item.sourceId || !item.bookId) return;
+    cacheBookShelfItem({
+      sourceId: item.sourceId,
+      sourceName: item.sourceName,
+      bookId: item.bookId,
+      title: item.title,
+      author: item.author,
+      cover: item.cover,
+      format: item.format,
+      detailHref: item.detailHref,
+      acquisitionHref: item.acquisitionHref,
+      saveTime: item.saveTime,
+    });
+  };
+
   return (
-    <div className='space-y-5'>
-      <section className='relative overflow-hidden rounded-[2rem] border border-emerald-100/80 bg-gradient-to-br from-emerald-50 via-white to-lime-50 p-5 shadow-sm shadow-emerald-950/5 dark:border-emerald-500/10 dark:from-emerald-950/30 dark:via-gray-950 dark:to-lime-950/20'>
-        <div className='absolute -right-16 -top-20 h-48 w-48 rounded-full bg-emerald-300/20 blur-3xl dark:bg-emerald-500/10' />
-        <div className='relative flex items-center justify-between gap-4'>
-          <div>
-            <div className='inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/70 px-3 py-1 text-xs font-semibold text-emerald-700 shadow-sm dark:border-emerald-500/20 dark:bg-gray-950/50 dark:text-emerald-200'>
-              <Clock3 className='h-3.5 w-3.5' />
-              Reading Timeline
-            </div>
-            <h1 className='mt-3 text-3xl font-black tracking-tight text-emerald-950 dark:text-emerald-50'>
-              阅读历史
-            </h1>
-            <div className='mt-2 text-sm text-slate-500 dark:text-slate-400'>
-              共 {items.length} 条记录
-            </div>
-          </div>
-          <button
-            type='button'
-            onClick={() => setCacheModalOpen(true)}
-            className='inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-2xl border border-emerald-200 bg-white/80 text-emerald-700 transition-colors duration-200 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-emerald-500/20 dark:bg-gray-950/60 dark:text-emerald-200 dark:hover:bg-emerald-500/10'
-            aria-label='缓存管理'
-            title='缓存管理'
-          >
-            <FolderCog className='h-5 w-5' />
-          </button>
+    <section className='space-y-4'>
+      <div className='flex items-center justify-between gap-3'>
+        <div className={cn('flex items-center gap-2 text-sm', LIBRARY_MUTED)}>
+          <Clock3 className={cn('h-4 w-4', LIBRARY_ACCENT_ICON)} />共{' '}
+          {items.length} 条记录
         </div>
-      </section>
+        <button
+          type='button'
+          onClick={() => setCacheModalOpen(true)}
+          className={cn(LIBRARY_ICON_BUTTON, LIBRARY_FOCUS)}
+          aria-label='缓存管理'
+          title='缓存管理'
+        >
+          <FolderCog className='h-5 w-5' />
+        </button>
+      </div>
 
       {loading ? (
-        <BookHistorySkeleton />
+        <MediaGridSkeleton count={12} />
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={<Clock3 className='h-7 w-7' />}
+          title='还没有阅读记录'
+          description='打开过的电子书会按时间排在这里，点卡片即可接着上次的位置读，长按卡片可删除。'
+        />
       ) : (
-        visibleItems.map((item) => (
-          <article
-            key={item.storageKey}
-            className='rounded-[2rem] border border-emerald-100/80 bg-white/85 p-4 shadow-sm shadow-emerald-950/5 transition-colors duration-200 hover:border-emerald-200 hover:bg-white dark:border-emerald-500/10 dark:bg-gray-950/70 dark:hover:border-emerald-500/30'
-          >
-            <div className='flex gap-4'>
-              <div className='h-28 w-20 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-50 to-lime-50 ring-1 ring-emerald-100 dark:from-gray-900 dark:to-emerald-950/20 dark:ring-emerald-500/10'>
-                {item.cover ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={item.cover}
-                    alt={item.title}
-                    className='h-full w-full object-cover'
-                  />
-                ) : (
-                  <div className='flex h-full items-center justify-center text-emerald-400'>
-                    <BookOpen className='h-7 w-7' />
-                  </div>
-                )}
-              </div>
-              <div className='min-w-0 flex-1'>
-                <div className='truncate font-semibold text-slate-950 dark:text-white'>
-                  {item.title}
-                </div>
-                <div className='mt-1 truncate text-sm text-slate-500 dark:text-slate-400'>
-                  {item.author || item.sourceName}
-                </div>
-                <div className='mt-3 h-2 overflow-hidden rounded-full bg-emerald-50 dark:bg-gray-900'>
-                  <div
-                    className='h-full rounded-full bg-emerald-600'
-                    style={{
-                      width: `${Math.max(
-                        0,
-                        Math.min(100, Math.round(item.progressPercent || 0))
-                      )}%`,
-                    }}
-                  />
-                </div>
-                <div className='mt-1 text-xs text-slate-500 dark:text-slate-400'>
-                  已读 {Math.round(item.progressPercent || 0)}% ·{' '}
-                  {getReadableChapterLabel(item)}
-                </div>
-                <div className='mt-3 flex flex-wrap gap-2'>
-                  {item.sourceId ? (
-                    <Link
-                      href={buildBookReadPath(item.sourceId, item.bookId)}
-                      onClick={() => {
-                        cacheBookReadRecord(item);
-                        if (item.sourceId && item.bookId) {
-                          cacheBookShelfItem({
-                            sourceId: item.sourceId,
-                            sourceName: item.sourceName,
-                            bookId: item.bookId,
-                            title: item.title,
-                            author: item.author,
-                            cover: item.cover,
-                            format: item.format,
-                            detailHref: item.detailHref,
-                            acquisitionHref: item.acquisitionHref,
-                            saveTime: item.saveTime,
-                          });
-                        }
-                      }}
-                      className='inline-flex cursor-pointer items-center gap-1.5 rounded-2xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition-colors duration-200 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500'
-                    >
-                      继续阅读
-                    </Link>
-                  ) : (
-                    <span className='rounded-2xl bg-gray-200 px-3 py-2 text-xs text-gray-500 dark:bg-gray-800'>
-                      历史记录缺少书源信息
-                    </span>
-                  )}
-                  <button
-                    onClick={async () => {
-                      const [
-                        deleteSourceId = item.sourceId,
-                        deleteBookId = item.bookId,
-                      ] = item.storageKey.split('+');
-                      await deleteBookReadRecord(deleteSourceId, deleteBookId);
-                      updateRecords(
-                        (() => {
-                          const next = { ...records };
-                          delete next[item.storageKey];
-                          return next;
-                        })()
-                      );
-                    }}
-                    className='cursor-pointer rounded-2xl border border-emerald-100 px-3 py-2 text-xs font-semibold text-slate-600 transition-colors duration-200 hover:bg-emerald-50 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-emerald-500/10 dark:text-slate-300 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200'
-                  >
-                    删除
-                  </button>
-                </div>
-              </div>
-            </div>
-          </article>
-        ))
+        <MediaGrid>
+          {items.map((item) => {
+            const percent = Math.max(
+              0,
+              Math.min(100, Math.round(item.progressPercent || 0))
+            );
+            const readHref = item.sourceId
+              ? buildBookReadPath(item.sourceId, item.bookId)
+              : undefined;
+            /** 短按和菜单里的「继续阅读」是同一件事，别再写两遍。 */
+            const openReader = () => {
+              if (!readHref) return;
+              rememberOpen(item);
+              router.push(readHref);
+            };
+            return (
+              <MediaPressCard
+                key={item.storageKey}
+                item={{
+                  key: item.storageKey,
+                  title: item.title,
+                  image: item.cover,
+                  meta: item.sourceName,
+                  subtitle: [
+                    item.author,
+                    item.sourceId
+                      ? getReadableChapterLabel(item)
+                      : '历史记录缺少书源信息',
+                  ]
+                    .filter(Boolean)
+                    .join(' · '),
+                  progress: percent,
+                }}
+                href={readHref}
+                onNavigate={() => rememberOpen(item)}
+                onPress={openReader}
+                title={item.title}
+                poster={item.cover ? processImageUrl(item.cover) : undefined}
+                sourceName={item.sourceName}
+                actions={[
+                  {
+                    id: 'continue-reading',
+                    label: '继续阅读',
+                    icon: <BookOpen size={20} />,
+                    onClick: openReader,
+                    color: 'primary' as const,
+                  },
+                  {
+                    id: 'delete',
+                    label: '删除',
+                    icon: <Trash2 size={20} />,
+                    onClick: () => void handleDelete(item),
+                    color: 'danger' as const,
+                  },
+                ]}
+              />
+            );
+          })}
+        </MediaGrid>
       )}
-      {!loading && items.length === 0 ? (
-        <div className='rounded-3xl border border-dashed border-emerald-200 bg-white/70 p-8 text-center text-sm text-slate-500 dark:border-emerald-500/20 dark:bg-gray-950/50 dark:text-slate-400'>
-          暂无阅读历史
-        </div>
-      ) : null}
 
       {cacheModalOpen &&
         mounted &&
@@ -318,18 +288,26 @@ export default function BookHistoryPage() {
             onClick={() => setCacheModalOpen(false)}
           >
             <div
-              className='absolute right-0 top-0 h-screen w-full max-w-lg overflow-y-auto border-l border-emerald-100 bg-[radial-gradient(circle_at_top_right,#dcfce7_0,transparent_20rem),linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] shadow-2xl dark:border-emerald-500/10 dark:bg-[radial-gradient(circle_at_top_right,rgba(6,95,70,0.24)_0,transparent_20rem),linear-gradient(180deg,#030712_0%,#09090b_100%)]'
+              className='absolute right-0 top-0 h-screen w-full max-w-lg overflow-y-auto border-l border-library-edge bg-library-paper shadow-2xl dark:border-library-night-edge dark:bg-library-night'
               onClick={(event) => event.stopPropagation()}
             >
               <div className='space-y-5 p-5'>
-                <div className='rounded-[2rem] border border-emerald-100/80 bg-white/80 p-4 shadow-sm shadow-emerald-950/5 backdrop-blur dark:border-emerald-500/10 dark:bg-gray-950/70'>
+                <div className={cn(LIBRARY_PANEL, 'p-4')}>
                   <div className='flex items-start justify-between gap-4'>
                     <div>
-                      <div className='flex items-center gap-2 text-base font-semibold text-slate-950 dark:text-white'>
-                        <Database className='h-4 w-4 text-emerald-600 dark:text-emerald-300' />
+                      <div
+                        className={cn(
+                          'flex items-center gap-2 text-base font-semibold',
+                          LIBRARY_TEXT,
+                          LIBRARY_SERIF
+                        )}
+                      >
+                        <Database
+                          className={cn('h-4 w-4', LIBRARY_ACCENT_ICON)}
+                        />
                         缓存管理
                       </div>
-                      <div className='mt-1 text-xs text-slate-500 dark:text-slate-400'>
+                      <div className={cn('mt-1 text-xs', LIBRARY_MUTED)}>
                         已缓存 {cacheItems.length} 本 ·{' '}
                         {formatBytes(cacheTotalSize)}
                       </div>
@@ -338,7 +316,7 @@ export default function BookHistoryPage() {
                       <button
                         type='button'
                         onClick={() => void loadCacheItems()}
-                        className='inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-emerald-200 bg-white/80 text-emerald-700 transition-colors duration-200 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-emerald-500/20 dark:bg-gray-950/60 dark:text-emerald-200 dark:hover:bg-emerald-500/10'
+                        className={cn(LIBRARY_ICON_BUTTON, LIBRARY_FOCUS)}
                         aria-label='刷新缓存'
                         title='刷新缓存'
                       >
@@ -347,7 +325,10 @@ export default function BookHistoryPage() {
                       <button
                         type='button'
                         onClick={() => setConfirmAction({ type: 'clear-all' })}
-                        className='inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-red-200 bg-white/80 text-red-600 transition-colors duration-200 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-red-500/20 dark:bg-gray-950/60 dark:text-red-300 dark:hover:bg-red-500/10'
+                        className={cn(
+                          LIBRARY_ICON_BUTTON_DANGER,
+                          LIBRARY_FOCUS
+                        )}
                         aria-label='清空全部缓存'
                         title='清空全部缓存'
                       >
@@ -356,7 +337,7 @@ export default function BookHistoryPage() {
                       <button
                         type='button'
                         onClick={() => setCacheModalOpen(false)}
-                        className='inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-emerald-200 bg-white/80 text-slate-600 transition-colors duration-200 hover:bg-emerald-50 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-emerald-500/20 dark:bg-gray-950/60 dark:text-slate-300 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200'
+                        className={cn(LIBRARY_ICON_BUTTON, LIBRARY_FOCUS)}
                         aria-label='关闭'
                         title='关闭'
                       >
@@ -367,32 +348,34 @@ export default function BookHistoryPage() {
                 </div>
 
                 {cacheLoading ? (
-                  <div className='rounded-3xl border border-emerald-100 bg-white/75 p-5 text-center text-sm text-slate-500 shadow-sm dark:border-emerald-500/10 dark:bg-gray-950/60 dark:text-slate-400'>
-                    正在读取缓存…
-                  </div>
+                  <EmptyState description='正在读取缓存…' />
                 ) : null}
                 {!cacheLoading && cacheItems.length === 0 ? (
-                  <div className='rounded-3xl border border-dashed border-emerald-200 bg-white/75 p-8 text-center text-sm text-slate-500 shadow-sm dark:border-emerald-500/20 dark:bg-gray-950/60 dark:text-slate-400'>
-                    当前还没有缓存书籍
-                  </div>
+                  <EmptyState
+                    icon={<Database className='h-7 w-7' />}
+                    title='还没有缓存书籍'
+                    description='在线阅读过的电子书会把文件存在本地，这里可以查看与清理。'
+                  />
                 ) : null}
 
                 <div className='space-y-3'>
                   {cacheItems.map((item) => (
-                    <div
-                      key={item.key}
-                      className='rounded-[2rem] border border-emerald-100/80 bg-white/85 p-4 shadow-sm shadow-emerald-950/5 transition-colors duration-200 hover:border-emerald-200 hover:bg-white dark:border-emerald-500/10 dark:bg-gray-950/70 dark:hover:border-emerald-500/30'
-                    >
+                    <div key={item.key} className={cn(CARD_CLASS, 'p-4')}>
                       <div className='flex items-start justify-between gap-3'>
                         <div className='min-w-0 flex-1'>
-                          <div className='truncate font-semibold text-slate-950 dark:text-white'>
+                          <div
+                            className={cn(
+                              'truncate font-semibold',
+                              LIBRARY_TEXT
+                            )}
+                          >
                             {item.title}
                           </div>
-                          <div className='mt-1 text-xs text-slate-500 dark:text-slate-400'>
+                          <div className={cn('mt-1 text-xs', LIBRARY_MUTED)}>
                             格式 {item.format.toUpperCase()} · 大小{' '}
                             {formatBytes(item.size)}
                           </div>
-                          <div className='mt-1 text-xs text-slate-500 dark:text-slate-400'>
+                          <div className={cn('mt-1 text-xs', LIBRARY_MUTED)}>
                             最近打开{' '}
                             {new Date(item.lastOpenTime).toLocaleString()}
                           </div>
@@ -406,7 +389,10 @@ export default function BookHistoryPage() {
                               title: item.title,
                             })
                           }
-                          className='inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-red-100 bg-white/80 text-red-600 transition-colors duration-200 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-red-500/20 dark:bg-gray-950/60 dark:text-red-300 dark:hover:bg-red-500/10'
+                          className={cn(
+                            LIBRARY_ICON_BUTTON_DANGER,
+                            LIBRARY_FOCUS
+                          )}
                           aria-label='删除缓存'
                           title='删除缓存'
                         >
@@ -430,16 +416,22 @@ export default function BookHistoryPage() {
             onClick={() => setConfirmAction(null)}
           >
             <div
-              className='w-full max-w-sm rounded-[2rem] border border-emerald-100 bg-white/95 p-5 shadow-2xl shadow-emerald-950/10 dark:border-emerald-500/10 dark:bg-gray-950/95'
+              className={cn(LIBRARY_PANEL, 'w-full max-w-sm p-5 shadow-2xl')}
               onClick={(event) => event.stopPropagation()}
             >
-              <div className='flex items-center gap-2 text-base font-bold text-slate-950 dark:text-white'>
-                <Trash2 className='h-4 w-4 text-red-600 dark:text-red-300' />
+              <div
+                className={cn(
+                  'flex items-center gap-2 text-base font-semibold',
+                  LIBRARY_TEXT,
+                  LIBRARY_SERIF
+                )}
+              >
+                <Trash2 className='h-4 w-4 text-red-600 dark:text-red-400' />
                 {confirmAction.type === 'clear-all'
                   ? '清空全部缓存'
                   : '删除缓存'}
               </div>
-              <div className='mt-2 text-sm text-gray-500 dark:text-gray-400'>
+              <div className={cn('mt-2 text-sm', LIBRARY_MUTED)}>
                 {confirmAction.type === 'clear-all'
                   ? '确认清空当前浏览器中的全部电子书缓存吗？此操作不可撤销。'
                   : `确认删除《${
@@ -450,7 +442,10 @@ export default function BookHistoryPage() {
                 <button
                   type='button'
                   onClick={() => setConfirmAction(null)}
-                  className='cursor-pointer rounded-2xl border border-emerald-200 px-4 py-2 text-sm font-semibold text-slate-600 transition-colors duration-200 hover:bg-emerald-50 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-emerald-500/20 dark:text-slate-300 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200'
+                  className={cn(
+                    LIBRARY_GHOST_BUTTON,
+                    'cursor-pointer px-4 py-2 text-sm'
+                  )}
                 >
                   取消
                 </button>
@@ -470,7 +465,7 @@ export default function BookHistoryPage() {
                     }
                     setConfirmAction(null);
                   }}
-                  className='cursor-pointer rounded-2xl bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition-colors duration-200 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500'
+                  className={cn(DANGER_BUTTON_CLASS, LIBRARY_FOCUS)}
                 >
                   确认
                 </button>
@@ -479,6 +474,6 @@ export default function BookHistoryPage() {
           </div>,
           document.body
         )}
-    </div>
+    </section>
   );
 }

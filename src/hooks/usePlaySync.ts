@@ -4,9 +4,46 @@
 import { useRouter } from 'next/navigation';
 import { useCallback,useEffect, useRef } from 'react';
 
+import { watchRoomSocketManager } from '@/lib/watch-room-socket';
+
 import { useWatchRoomContextSafe } from '@/components/WatchRoomProvider';
 
 import type { PlayState } from '@/types/watch-room';
+
+// 模块级缓存：房员最近收到的房主倍速，用于换集/重进播放页后恢复
+let lastRemotePlaybackRate: number | null = null;
+// 标记正在应用观影室同步的倍速，播放页据此跳过个人偏好倍速的记忆
+let remoteRateApplyUntil = 0;
+// 当前是否在观影室内（离开房间后不再使用缓存的房主倍速）
+let isInRoomNow = false;
+
+// 播放页调用：判断当前倍速变化是否来自观影室同步
+export function isRemoteRoomRateActive() {
+  return isInRoomNow && Date.now() < remoteRateApplyUntil;
+}
+
+// 播放页调用：获取房主当前倍速（不在房间内或未收到过同步时为 null）
+export function getRoomRemotePlaybackRate() {
+  return isInRoomNow ? lastRemotePlaybackRate : null;
+}
+
+// 应用房主同步的倍速（仅在差异超过阈值时设置，避免触发多余的 ratechange）
+function applyRemotePlaybackRate(player: any, rate?: number | null) {
+  if (!rate || !Number.isFinite(rate) || rate <= 0) return;
+
+  lastRemotePlaybackRate = rate;
+
+  const currentRate = player.playbackRate || 1;
+  if (Math.abs(currentRate - rate) > 0.01) {
+    remoteRateApplyUntil = Date.now() + 1000;
+    player.playbackRate = rate;
+    try {
+      player.notice.show = `倍速：${rate}x`;
+    } catch {
+      // notice 不可用时忽略
+    }
+  }
+}
 
 interface UsePlaySyncOptions {
   artPlayerRef: React.MutableRefObject<any>;
@@ -35,12 +72,36 @@ export function usePlaySync({
   const watchRoom = useWatchRoomContextSafe();
   const lastSyncTimeRef = useRef(0); // 上次同步时间
   const isHandlingRemoteCommandRef = useRef(false); // 标记是否正在处理远程命令
+  const isOwnerRef = useRef(false); // 卸载时读取的房主身份（避免闭包过期）
+  const ownerPlaySyncActiveRef = useRef(false); // 房主的播放同步是否已激活（卸载时据此通知房员）
 
   // 检查是否在房间内
   const isInRoom = !!(watchRoom && watchRoom.currentRoom);
   const isOwner = watchRoom?.isOwner || false;
   const currentRoom = watchRoom?.currentRoom;
   const socket = watchRoom?.socket;
+
+  // 同步模块级的房间状态标记（供播放页的导出函数判断）
+  useEffect(() => {
+    isInRoomNow = isInRoom;
+    isOwnerRef.current = isOwner;
+    if (!isInRoom) {
+      lastRemotePlaybackRate = null;
+    }
+  }, [isInRoom, isOwner]);
+
+  // 房主离开播放页（SPA 导航，连接仍保持）：通知房员暂停并提示；
+  // 房主回到播放页后周期广播会自动恢复同步
+  useEffect(() => {
+    return () => {
+      // 未成为房主或同步未激活过时不通知（覆盖开发环境 StrictMode 挂载期间的假卸载）
+      if (!isOwnerRef.current || !ownerPlaySyncActiveRef.current) return;
+      const sock = watchRoomSocketManager.getSocket();
+      if (!sock || !watchRoomSocketManager.isConnected()) return;
+      console.log('[PlaySync] Owner left play page, notifying members');
+      sock.emit('play:owner-leave');
+    };
+  }, []);
 
   // 广播播放状态给房间内所有人（任何成员都可以触发同步）
   const broadcastPlayState = useCallback(() => {
@@ -54,6 +115,7 @@ export function usePlaySync({
       url: videoUrl,
       currentTime: player.currentTime || 0,
       isPlaying: player.playing || false,
+      playbackRate: player.playbackRate || 1,
       videoId,
       videoName,
       videoYear,
@@ -98,8 +160,19 @@ export function usePlaySync({
       // 标记正在处理远程命令
       isHandlingRemoteCommandRef.current = true;
 
-      // play:update 只同步进度，不改变播放/暂停状态
-      // 播放/暂停状态由 play:play 和 play:pause 命令控制
+      // 同步房主的播放倍速
+      applyRemotePlaybackRate(player, state.playbackRate);
+
+      // 同步播放/暂停状态（房主暂停时，房员也会被暂停；标记位会阻止回环广播）
+      if (state.isPlaying && !player.playing) {
+        player.play()?.catch(() => {
+          // 浏览器自动播放策略拦截时忽略，等待用户交互
+        });
+      } else if (!state.isPlaying && player.playing) {
+        player.pause();
+      }
+
+      // 同步播放进度
       const timeDiff = Math.abs(player.currentTime - state.currentTime);
       if (timeDiff > 2) {
         console.log('[PlaySync] Seeking to:', state.currentTime, '(diff:', timeDiff, 's)');
@@ -234,6 +307,11 @@ export function usePlaySync({
         return;
       }
 
+      // 记住房主当前倍速，重进播放页后恢复
+      if (state.playbackRate && Number.isFinite(state.playbackRate) && state.playbackRate > 0) {
+        lastRemotePlaybackRate = state.playbackRate;
+      }
+
       // 跟随切换视频
       // 构建完整的 URL 参数
       const params = new URLSearchParams({
@@ -254,11 +332,54 @@ export function usePlaySync({
       router.push(url);
     };
 
+    // 房主离开播放页面：房员暂停并提示，等待房主回来后由周期广播自动恢复同步
+    const handleOwnerLeft = () => {
+      console.log('[PlaySync] Received play:owner-left event');
+      if (isOwner) return;
+
+      const player = artPlayerRef.current;
+      if (!player) {
+        console.warn('[PlaySync] Player not ready for play:owner-left');
+        return;
+      }
+
+      // 标记正在处理远程命令，避免暂停被当成房员操作回环广播
+      isHandlingRemoteCommandRef.current = true;
+      if (player.playing) {
+        player.pause();
+      }
+      try {
+        player.notice.show = '房主已离开播放页面，暂停同步';
+      } catch {
+        // notice 不可用时忽略
+      }
+      setTimeout(() => {
+        isHandlingRemoteCommandRef.current = false;
+      }, 500);
+    };
+
+    // 房主心跳超时（如直接关闭页面）：房员暂停，等待房主重连
+    const handleStateCleared = () => {
+      console.log('[PlaySync] Received state:cleared event');
+      if (isOwner) return;
+
+      const player = artPlayerRef.current;
+      if (!player || !player.playing) return;
+
+      isHandlingRemoteCommandRef.current = true;
+      player.pause();
+      setTimeout(() => {
+        isHandlingRemoteCommandRef.current = false;
+      }, 500);
+    };
+
     socket.on('play:update', handlePlayUpdate);
     socket.on('play:play', handlePlayCommand);
     socket.on('play:pause', handlePauseCommand);
     socket.on('play:seek', handleSeekCommand);
     socket.on('play:change', handleChangeCommand);
+    socket.on('play:owner-left', handleOwnerLeft);
+    socket.on('state:cleared', handleStateCleared);
 
     console.log('[PlaySync] Event listeners registered');
 
@@ -269,8 +390,46 @@ export function usePlaySync({
       socket.off('play:pause', handlePauseCommand);
       socket.off('play:seek', handleSeekCommand);
       socket.off('play:change', handleChangeCommand);
+      socket.off('play:owner-left', handleOwnerLeft);
+      socket.off('state:cleared', handleStateCleared);
     };
   }, [socket, currentRoom, isInRoom, isOwner]);
+
+  // 房员重进播放页（或经观影室入口跳转）时，若与房主当前观看的视频/源/集数不一致，
+  // 自动跳回房主的内容恢复同步（URL 构建与 play:change 跟随一致）
+  useEffect(() => {
+    // 仅房员处理；房主或不在房间时跳过
+    if (!isInRoom || isOwner) return;
+    const state = currentRoom?.currentState;
+    if (!state || state.type !== 'play') return;
+    // 本页视频信息未就绪时等待
+    if (!videoId || !currentSource) return;
+
+    // 与房主一致时无需跳转（跳转后状态会收敛到这里，不会循环）
+    if (
+      state.videoId === videoId &&
+      state.source === currentSource &&
+      (state.episode || 1) === (currentEpisode || 1)
+    ) {
+      return;
+    }
+
+    // 跟随房主，构建完整的 URL 参数
+    const params = new URLSearchParams({
+      id: state.videoId,
+      source: state.source,
+      episode: String(state.episode || 1),
+    });
+
+    // 添加可选参数
+    if (state.videoName) params.set('title', state.videoName);
+    if (state.videoYear) params.set('year', state.videoYear);
+    if (state.searchTitle) params.set('stitle', state.searchTitle);
+
+    const url = `/play?${params.toString()}`;
+    console.log('[PlaySync] Member re-sync, redirecting to owner video:', url);
+    router.push(url);
+  }, [isInRoom, isOwner, currentRoom, videoId, currentSource, currentEpisode, router]);
 
   // 监听播放器事件并广播（所有成员都可以触发同步）
   useEffect(() => {
@@ -291,6 +450,11 @@ export function usePlaySync({
     }
 
     console.log('[PlaySync] Setting up player event listeners');
+
+    // 房主：标记播放同步已激活（卸载播放页时据此通知房员）
+    if (isOwner) {
+      ownerPlaySyncActiveRef.current = true;
+    }
 
     const handlePlay = () => {
       // 如果正在处理远程命令，不要广播（避免循环）
@@ -346,15 +510,32 @@ export function usePlaySync({
       watchRoom.seekPlayback(player.currentTime);
     };
 
+    const handleRateChange = () => {
+      // 如果正在处理远程命令，不要广播（避免循环）
+      if (isHandlingRemoteCommandRef.current) return;
+
+      // 房主倍速变化立即广播，暂停状态下也能同步
+      if (isOwner) {
+        console.log('[PlaySync] Rate change detected, broadcasting state');
+        broadcastPlayState();
+      }
+    };
+
     player.on('play', handlePlay);
     player.on('pause', handlePause);
     player.on('seeked', handleSeeked);
+    player.on('video:ratechange', handleRateChange);
 
-    // 定期同步播放进度（每5秒）
+    // 房员：播放器就绪后恢复房主当前倍速（换集/进房后）
+    if (!isOwner && lastRemotePlaybackRate) {
+      applyRemotePlaybackRate(player, lastRemotePlaybackRate);
+    }
+
+    // 定期同步播放进度（每5秒，暂停时也同步，
+    // 让中途加入的房员能收到房主当前的暂停状态和进度）
     const syncInterval = setInterval(() => {
-      if (!player.playing) return; // 暂停时不同步
+      if (!isOwner) return; // 仅房主广播
 
-      console.log('[PlaySync] Periodic sync - broadcasting state');
       broadcastPlayState();
     }, 5000);
 
@@ -365,9 +546,10 @@ export function usePlaySync({
       player.off('play', handlePlay);
       player.off('pause', handlePause);
       player.off('seeked', handleSeeked);
+      player.off('video:ratechange', handleRateChange);
       clearInterval(syncInterval);
     };
-  }, [socket, currentRoom, artPlayerRef, watchRoom, broadcastPlayState, isInRoom, playerReady]);
+  }, [socket, currentRoom, artPlayerRef, watchRoom, broadcastPlayState, isInRoom, isOwner, playerReady]);
 
   // 使用ref跟踪上一次的值，用于检测真正的变化
   const lastBroadcastRef = useRef<{
@@ -414,6 +596,7 @@ export function usePlaySync({
         url: videoUrl,
         currentTime: artPlayerRef.current?.currentTime || 0,
         isPlaying: artPlayerRef.current?.playing || false,
+        playbackRate: artPlayerRef.current?.playbackRate || 1,
         videoId,
         videoName,
         videoYear,
@@ -461,6 +644,7 @@ export function usePlaySync({
       url: videoUrl,
       currentTime: artPlayerRef.current?.currentTime || 0,
       isPlaying: artPlayerRef.current?.playing || false,
+      playbackRate: artPlayerRef.current?.playbackRate || 1,
       videoId,
       videoName,
       videoYear,

@@ -2,29 +2,45 @@
 
 import { Search } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
-import { deleteMangaShelf, getAllMangaShelf, saveMangaShelf } from '@/lib/db.client';
-import { MangaSearchItem, MangaShelfItem, MangaSource } from '@/lib/manga.types';
+import { cn } from '@/lib/cn';
+import {
+  deleteMangaShelf,
+  getAllMangaShelf,
+  saveMangaShelf,
+} from '@/lib/db.client';
+import {
+  MangaSearchItem,
+  MangaShelfItem,
+  MangaSource,
+} from '@/lib/manga.types';
 
-import MangaCard from '@/components/MangaCard';
+import {
+  mangaCardItem,
+  mangaItemDetailHref,
+} from '@/components/media/adapters';
+import EmptyState from '@/components/media/EmptyState';
+import {
+  LIBRARY_BUTTON,
+  LIBRARY_FIELD,
+  LIBRARY_MUTED,
+  LIBRARY_PANEL,
+} from '@/components/media/library';
+import MediaCard from '@/components/media/MediaCard';
+import MediaGrid from '@/components/media/MediaGrid';
+import MediaGridSkeleton from '@/components/media/MediaGridSkeleton';
+import MediaSectionHeader from '@/components/media/MediaSectionHeader';
+import ShelfChipButton from '@/components/media/ShelfChipButton';
 
 const MANGA_SEARCH_STATE_KEY = 'manga_search_state';
-
-function MangaCardSkeleton({ withButton = false }: { withButton?: boolean }) {
-  return (
-    <div className='space-y-2'>
-      <div className='overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950'>
-        <div className='aspect-[3/4] w-full animate-pulse bg-gray-200 dark:bg-gray-800' />
-        <div className='space-y-3 p-3'>
-          <div className='h-4 w-3/4 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-          <div className='h-3 w-1/2 animate-pulse rounded bg-gray-200 dark:bg-gray-800' />
-        </div>
-      </div>
-      {withButton && <div className='h-9 w-full animate-pulse rounded-2xl bg-gray-200 dark:bg-gray-800' />}
-    </div>
-  );
-}
 
 export default function MangaSearchPage() {
   const router = useRouter();
@@ -52,15 +68,22 @@ export default function MangaSearchPage() {
   const [completedSources, setCompletedSources] = useState(0);
   const [useFluidSearch, setUseFluidSearch] = useState(true);
 
-  const getCacheKey = useCallback((keyword: string, selectedSourceId: string) => {
-    return `manga_search_cache_${selectedSourceId || 'all'}_${keyword.trim()}`;
-  }, []);
+  const getCacheKey = useCallback(
+    (keyword: string, selectedSourceId: string) => {
+      return `manga_search_cache_${
+        selectedSourceId || 'all'
+      }_${keyword.trim()}`;
+    },
+    []
+  );
 
   const getCachedResults = useCallback(
     (keyword: string, selectedSourceId: string) => {
       if (typeof window === 'undefined' || !keyword.trim()) return null;
       try {
-        const cached = sessionStorage.getItem(getCacheKey(keyword, selectedSourceId));
+        const cached = sessionStorage.getItem(
+          getCacheKey(keyword, selectedSourceId)
+        );
         return cached ? (JSON.parse(cached) as MangaSearchItem[]) : null;
       } catch {
         return null;
@@ -70,10 +93,17 @@ export default function MangaSearchPage() {
   );
 
   const setCachedResults = useCallback(
-    (keyword: string, selectedSourceId: string, nextResults: MangaSearchItem[]) => {
+    (
+      keyword: string,
+      selectedSourceId: string,
+      nextResults: MangaSearchItem[]
+    ) => {
       if (typeof window === 'undefined' || !keyword.trim()) return;
       try {
-        sessionStorage.setItem(getCacheKey(keyword, selectedSourceId), JSON.stringify(nextResults));
+        sessionStorage.setItem(
+          getCacheKey(keyword, selectedSourceId),
+          JSON.stringify(nextResults)
+        );
       } catch {
         // ignore session cache failures
       }
@@ -81,16 +111,19 @@ export default function MangaSearchPage() {
     [getCacheKey]
   );
 
-
   const readFluidSearchSetting = useCallback(() => {
     if (typeof window === 'undefined') return true;
     try {
       const savedFluidSearch = localStorage.getItem('fluidSearch');
-      if (savedFluidSearch !== null) return JSON.parse(savedFluidSearch) !== false;
+      if (savedFluidSearch !== null)
+        return JSON.parse(savedFluidSearch) !== false;
     } catch {
       // ignore invalid localStorage values
     }
-    return (window as any).RUNTIME_CONFIG?.FLUID_SEARCH !== false;
+    return (
+      (window as Window & { RUNTIME_CONFIG?: { FLUID_SEARCH?: boolean } })
+        .RUNTIME_CONFIG?.FLUID_SEARCH !== false
+    );
   }, []);
 
   const closeEventSource = useCallback(() => {
@@ -112,29 +145,42 @@ export default function MangaSearchPage() {
     }
   }, []);
 
-  const appendBufferedResults = useCallback((nextResults: MangaSearchItem[]) => {
-    if (nextResults.length === 0) return;
-    pendingResultsRef.current.push(...nextResults);
-    if (!flushTimerRef.current) {
-      flushTimerRef.current = window.setTimeout(() => {
-        const toAppend = pendingResultsRef.current;
-        pendingResultsRef.current = [];
-        startTransition(() => {
-          setResults((prev) => prev.concat(toAppend));
-        });
-        flushTimerRef.current = null;
-      }, 80);
-    }
-  }, []);
+  const appendBufferedResults = useCallback(
+    (nextResults: MangaSearchItem[]) => {
+      if (nextResults.length === 0) return;
+      pendingResultsRef.current.push(...nextResults);
+      if (!flushTimerRef.current) {
+        flushTimerRef.current = window.setTimeout(() => {
+          const toAppend = pendingResultsRef.current;
+          pendingResultsRef.current = [];
+          startTransition(() => {
+            setResults((prev) => prev.concat(toAppend));
+          });
+          flushTimerRef.current = null;
+        }, 80);
+      }
+    },
+    []
+  );
 
-  const saveSearchState = useCallback((nextState: { query: string; sourceId: string; results: MangaSearchItem[] }) => {
-    if (typeof window === 'undefined') return;
-    try {
-      sessionStorage.setItem(MANGA_SEARCH_STATE_KEY, JSON.stringify(nextState));
-    } catch {
-      // ignore session cache failures
-    }
-  }, []);
+  const saveSearchState = useCallback(
+    (nextState: {
+      query: string;
+      sourceId: string;
+      results: MangaSearchItem[];
+    }) => {
+      if (typeof window === 'undefined') return;
+      try {
+        sessionStorage.setItem(
+          MANGA_SEARCH_STATE_KEY,
+          JSON.stringify(nextState)
+        );
+      } catch {
+        // ignore session cache failures
+      }
+    },
+    []
+  );
 
   const restoreSearchState = useCallback(() => {
     if (typeof window === 'undefined') return null;
@@ -160,7 +206,9 @@ export default function MangaSearchPage() {
       .then((data) => setSources(data.sources || []))
       .catch(() => undefined);
 
-    getAllMangaShelf().then(setShelf).catch(() => undefined);
+    getAllMangaShelf()
+      .then(setShelf)
+      .catch(() => undefined);
 
     return () => {
       closeEventSource();
@@ -169,7 +217,11 @@ export default function MangaSearchPage() {
   }, [clearPendingResults, closeEventSource, readFluidSearchSetting]);
 
   const performSearch = useCallback(
-    async (keyword: string, selectedSourceId: string, options?: { forceRefresh?: boolean }) => {
+    async (
+      keyword: string,
+      selectedSourceId: string,
+      options?: { forceRefresh?: boolean }
+    ) => {
       const trimmedQuery = keyword.trim();
       if (!trimmedQuery) return;
       const normalizedSourceId = selectedSourceId || '';
@@ -188,10 +240,16 @@ export default function MangaSearchPage() {
       setTotalSources(0);
       setCompletedSources(0);
 
-      const cached = forceRefresh ? null : getCachedResults(trimmedQuery, normalizedSourceId);
+      const cached = forceRefresh
+        ? null
+        : getCachedResults(trimmedQuery, normalizedSourceId);
       if (cached) {
         setResults(cached);
-        saveSearchState({ query: trimmedQuery, sourceId: normalizedSourceId, results: cached });
+        saveSearchState({
+          query: trimmedQuery,
+          sourceId: normalizedSourceId,
+          results: cached,
+        });
         setLoading(false);
         setTotalSources(1);
         setCompletedSources(1);
@@ -201,7 +259,9 @@ export default function MangaSearchPage() {
       setResults([]);
 
       const currentFluidSearch = readFluidSearchSetting();
-      setUseFluidSearch((prev) => (prev === currentFluidSearch ? prev : currentFluidSearch));
+      setUseFluidSearch((prev) =>
+        prev === currentFluidSearch ? prev : currentFluidSearch
+      );
 
       const params = new URLSearchParams({ q: trimmedQuery });
       if (normalizedSourceId) params.set('sourceId', normalizedSourceId);
@@ -220,13 +280,20 @@ export default function MangaSearchPage() {
                 setCompletedSources(0);
                 break;
               case 'source_result':
-                setCompletedSources((prev) => Math.max(prev + 1, payload.completedSources || 0));
-                if (Array.isArray(payload.results) && payload.results.length > 0) {
+                setCompletedSources((prev) =>
+                  Math.max(prev + 1, payload.completedSources || 0)
+                );
+                if (
+                  Array.isArray(payload.results) &&
+                  payload.results.length > 0
+                ) {
                   appendBufferedResults(payload.results as MangaSearchItem[]);
                 }
                 break;
               case 'source_error':
-                setCompletedSources((prev) => Math.max(prev + 1, payload.completedSources || 0));
+                setCompletedSources((prev) =>
+                  Math.max(prev + 1, payload.completedSources || 0)
+                );
                 break;
               case 'error':
                 setError(payload.error || '搜索失败');
@@ -234,7 +301,9 @@ export default function MangaSearchPage() {
                 closeEventSource();
                 break;
               case 'complete': {
-                setCompletedSources(payload.completedSources || payload.totalSources || 0);
+                setCompletedSources(
+                  payload.completedSources || payload.totalSources || 0
+                );
                 if (pendingResultsRef.current.length > 0) {
                   const toAppend = pendingResultsRef.current;
                   pendingResultsRef.current = [];
@@ -245,15 +314,27 @@ export default function MangaSearchPage() {
                   startTransition(() => {
                     setResults((prev) => {
                       const nextResults = prev.concat(toAppend);
-                      setCachedResults(trimmedQuery, normalizedSourceId, nextResults);
-                      saveSearchState({ query: trimmedQuery, sourceId: normalizedSourceId, results: nextResults });
+                      setCachedResults(
+                        trimmedQuery,
+                        normalizedSourceId,
+                        nextResults
+                      );
+                      saveSearchState({
+                        query: trimmedQuery,
+                        sourceId: normalizedSourceId,
+                        results: nextResults,
+                      });
                       return nextResults;
                     });
                   });
                 } else {
                   setResults((prev) => {
                     setCachedResults(trimmedQuery, normalizedSourceId, prev);
-                    saveSearchState({ query: trimmedQuery, sourceId: normalizedSourceId, results: prev });
+                    saveSearchState({
+                      query: trimmedQuery,
+                      sourceId: normalizedSourceId,
+                      results: prev,
+                    });
                     return prev;
                   });
                 }
@@ -296,7 +377,11 @@ export default function MangaSearchPage() {
         setTotalSources(1);
         setCompletedSources(1);
         setCachedResults(trimmedQuery, normalizedSourceId, nextResults);
-        saveSearchState({ query: trimmedQuery, sourceId: normalizedSourceId, results: nextResults });
+        saveSearchState({
+          query: trimmedQuery,
+          sourceId: normalizedSourceId,
+          results: nextResults,
+        });
       } catch (err) {
         if (currentSearchKeyRef.current !== searchKey) return;
         setError((err as Error).message);
@@ -356,7 +441,14 @@ export default function MangaSearchPage() {
     const forceRefresh = forceNextUrlSearchRef.current;
     forceNextUrlSearchRef.current = false;
     void performSearch(urlQuery, urlSourceId, { forceRefresh });
-  }, [clearPendingResults, closeEventSource, performSearch, restoreSearchState, urlQuery, urlSourceId]);
+  }, [
+    clearPendingResults,
+    closeEventSource,
+    performSearch,
+    restoreSearchState,
+    urlQuery,
+    urlSourceId,
+  ]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -410,21 +502,27 @@ export default function MangaSearchPage() {
   };
 
   return (
-    <div className='mx-auto max-w-6xl'>
-      <form className='mx-auto mb-8 max-w-4xl' onSubmit={handleSearch}>
+    <div className='space-y-6'>
+      {/* 搜索框做成纸面书案的样式：一个实心纸面板托着输入、来源与搜索键。 */}
+      <form
+        className={cn(LIBRARY_PANEL, 'mx-auto max-w-4xl p-3 sm:p-4')}
+        onSubmit={handleSearch}
+      >
         <div className='flex flex-col gap-3 lg:flex-row'>
           <div className='flex-1'>
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder='搜索漫画标题'
-              className='w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm outline-none transition focus:border-sky-500 dark:border-gray-700 dark:bg-gray-900'
+              aria-label='搜索漫画标题'
+              className={LIBRARY_FIELD}
             />
           </div>
           <select
             value={sourceId}
             onChange={(e) => setSourceId(e.target.value)}
-            className='rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm dark:border-gray-700 dark:bg-gray-900 lg:w-56'
+            aria-label='选择漫画来源'
+            className={cn(LIBRARY_FIELD, 'cursor-pointer lg:w-56')}
           >
             <option value=''>全部来源</option>
             {sources.map((source) => (
@@ -433,53 +531,58 @@ export default function MangaSearchPage() {
               </option>
             ))}
           </select>
-          <button className='inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-600 px-6 py-3 text-sm font-medium text-white transition hover:bg-sky-700 lg:w-32'>
+          <button className={cn(LIBRARY_BUTTON, 'lg:w-32')}>
             <Search className='h-4 w-4' /> 搜索
           </button>
         </div>
       </form>
 
-      <section>
-        <div className='mb-4 flex items-center justify-between gap-3'>
-          <h2 className='text-lg font-semibold'>搜索结果{results.length > 0 ? `（${results.length}）` : ''}</h2>
-          {loading && useFluidSearch && totalSources > 0 && (
-            <span className='text-xs text-gray-500 dark:text-gray-400'>
-              搜索中 {completedSources}/{totalSources}
-            </span>
-          )}
-        </div>
-        {error && <div className='mb-4 text-sm text-red-500'>{error}</div>}
+      <section className='space-y-4'>
+        <MediaSectionHeader
+          title={`搜索结果${results.length > 0 ? `（${results.length}）` : ''}`}
+          action={
+            loading && useFluidSearch && totalSources > 0 ? (
+              <span className={cn('shrink-0 text-xs', LIBRARY_MUTED)}>
+                搜索中 {completedSources}/{totalSources}
+              </span>
+            ) : undefined
+          }
+        />
+        {error && <EmptyState tone='error' description={error} />}
         {loading && results.length === 0 ? (
-          <div className='grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-6'>
-            {Array.from({ length: 12 }).map((_, index) => (
-              <MangaCardSkeleton key={index} withButton />
-            ))}
-          </div>
+          <MediaGridSkeleton count={12} />
         ) : results.length === 0 ? (
-          <div className='rounded-2xl bg-gray-50 p-10 text-center text-sm text-gray-500 dark:bg-gray-900/50'>
-            {hasSearched ? '没有找到相关漫画' : '请输入关键词开始搜索漫画'}
-          </div>
+          <EmptyState
+            icon={<Search className='h-7 w-7' />}
+            title={hasSearched ? '没有找到相关漫画' : '还没有开始搜索'}
+            description={
+              hasSearched
+                ? '试试更短的关键词，或把来源切到「全部来源」。'
+                : '在上面的输入框里输入标题，或直接回车搜索全部漫画源。'
+            }
+          />
         ) : (
-          <div className='grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-6'>
+          <MediaGrid>
             {results.map((item) => {
               const key = `${item.sourceId}+${item.id}`;
               return (
-                <div key={key} className='space-y-2'>
-                  <MangaCard
-                    item={item}
-                    href={`/manga/detail?mangaId=${item.id}&sourceId=${item.sourceId}&title=${encodeURIComponent(item.title)}&cover=${encodeURIComponent(item.cover)}&sourceName=${encodeURIComponent(item.sourceName)}&description=${encodeURIComponent(item.description || '')}&author=${encodeURIComponent(item.author || '')}&status=${encodeURIComponent(item.status || '')}&returnTo=${encodeURIComponent(returnTo)}`}
-                    subtitle={item.author || item.status || item.description}
-                  />
-                  <button
-                    onClick={() => toggleShelf(item)}
-                    className='w-full rounded-2xl border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 transition hover:border-sky-500 hover:text-sky-600 dark:border-gray-700 dark:text-gray-200'
-                  >
-                    {shelf[key] ? '移出书架' : '加入书架'}
-                  </button>
-                </div>
+                <MediaCard
+                  key={key}
+                  item={{
+                    ...mangaCardItem(item),
+                    subtitle: item.author || item.status || item.description,
+                  }}
+                  href={mangaItemDetailHref(item, returnTo)}
+                  overlayAction={
+                    <ShelfChipButton
+                      active={Boolean(shelf[key])}
+                      onClick={() => toggleShelf(item)}
+                    />
+                  }
+                />
               );
             })}
-          </div>
+          </MediaGrid>
         )}
       </section>
     </div>

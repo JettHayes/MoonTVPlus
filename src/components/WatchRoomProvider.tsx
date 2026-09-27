@@ -254,6 +254,8 @@ export function WatchRoomProvider({ children }: WatchRoomProviderProps) {
                 if (authResponse.ok) {
                   const authData = await authResponse.json();
                   watchRoomConfig.externalServerAuth = authData.externalServerAuth;
+                  // 多应用隔离 ID（未配置时不携带，兼容旧版外部服务器）
+                  watchRoomConfig.externalAppId = authData.externalAppId || undefined;
                 } else {
                   console.error('[WatchRoom] Failed to load auth info:', authResponse.status);
                   // 如果无法获取认证信息，禁用观影室

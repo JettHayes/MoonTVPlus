@@ -2,10 +2,11 @@
 'use client';
 
 import { List as ListIcon, Lock, RefreshCw,UserPlus, Users } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { useEffect,useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect,useRef,useState } from 'react';
 
 import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
+import { getStoredRoomInfo } from '@/hooks/useWatchRoom';
 
 import PageLayout from '@/components/PageLayout';
 import Toast, { ToastProps } from '@/components/Toast';
@@ -44,7 +45,17 @@ function getScreenShareViewerSupportError() {
 }
 
 export default function WatchRoomPage() {
+  return (
+    <Suspense fallback={null}>
+      <WatchRoomPageContent />
+    </Suspense>
+  );
+}
+
+function WatchRoomPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const linkRoomId = searchParams.get('room');
   const watchRoom = useWatchRoomContext();
   const { getRoomList, isConnected, createRoom, joinRoom, currentRoom, isOwner, members, socket } = watchRoom;
   const [activeTab, setActiveTab] = useState<TabType>('create');
@@ -207,6 +218,28 @@ export default function WatchRoomPage() {
     }
   };
 
+  // 通过邀请链接进入时自动加入房间（已加入则跳过）
+  const autoJoinAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (!linkRoomId || autoJoinAttemptedRef.current) return;
+    if (!watchRoom.isConnected || currentRoom) return;
+
+    // 房主不接受邀请链接：直接拒绝加入
+    if (getStoredRoomInfo()?.isOwner) {
+      autoJoinAttemptedRef.current = true;
+      showToast('你是房间房主，无法通过邀请链接加入', 'error');
+      return;
+    }
+
+    autoJoinAttemptedRef.current = true;
+    joinRoom({
+      roomId: linkRoomId.trim().toUpperCase(),
+      userName: currentUsername,
+    }).catch((error: any) => {
+      showToast(error.message || '加入房间失败', 'error');
+    });
+  }, [linkRoomId, watchRoom.isConnected, currentRoom, currentUsername, joinRoom]);
+
   // 监听房间状态，房员加入后自动跟随房主播放
   useEffect(() => {
     if (!currentRoom || isOwner) return;
@@ -221,12 +254,20 @@ export default function WatchRoomPage() {
       return;
     }
 
-    // 房员加入房间后，不立即跳转
-    // 而是监听 play:change 或 live:change 事件（说明房主正在活跃使用）
-    // 这样可以避免房主已经离开play页面但状态未清除的情况
-
-    // 检查房主的播放状态 - 仅在首次加入且状态是最近更新时才跳转
-    // 这里不再自动跳转，而是等待房主的下一次操作
+    // 进度同步房：房主正在播放时自动跟随
+    const state = currentRoom.currentState;
+    if (state?.type === 'play') {
+      const params = new URLSearchParams({
+        id: state.videoId,
+        source: state.source,
+        episode: String(state.episode || 1),
+      });
+      if (state.videoName) params.set('title', state.videoName);
+      if (state.videoYear) params.set('year', state.videoYear);
+      if (state.searchTitle) params.set('stitle', state.searchTitle);
+      router.push(`/play?${params.toString()}`);
+    }
+    // 房主暂无播放状态时停留在本页等待，房主开始播放后会收到 play:change 自动跟随
   }, [currentRoom, isOwner]);
 
   // 监听房主的主动操作（切换视频/频道）

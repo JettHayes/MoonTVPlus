@@ -83,6 +83,8 @@ class WatchRoomSocketManager {
         ...socketOptions,
         auth: {
           token: config.externalServerAuth,
+          // 多应用隔离 ID，仅在配置时携带（未配置兼容旧版外部服务器）
+          ...(config.externalAppId ? { appId: config.externalAppId } : {}),
         },
         extraHeaders: config.externalServerAuth
           ? {

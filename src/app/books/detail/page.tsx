@@ -16,23 +16,52 @@ import {
   cacheBookDetail,
   getBookRouteCache,
 } from '@/lib/book-route-cache.client';
+import { cn } from '@/lib/cn';
+
+import EmptyState from '@/components/media/EmptyState';
+import {
+  BOOK_COVER_LIFT,
+  BOOK_SPINE_OVERLAY,
+  LIBRARY_BUTTON,
+  LIBRARY_FOCUS,
+  LIBRARY_GHOST_BUTTON,
+  LIBRARY_MUTED,
+  LIBRARY_PANEL,
+  LIBRARY_ROW,
+  LIBRARY_SERIF,
+  LIBRARY_SKELETON,
+  LIBRARY_TEXT,
+} from '@/components/media/library';
+import ProxyImage from '@/components/ProxyImage';
+
+const PANEL_CLASS = cn(LIBRARY_PANEL, 'p-5');
+const ROW_CLASS = cn(LIBRARY_ROW, 'px-4 py-3');
+const SOLID_BUTTON_CLASS = cn(LIBRARY_BUTTON, 'cursor-pointer px-5 py-2.5');
+const GHOST_BUTTON_CLASS = cn(
+  LIBRARY_GHOST_BUTTON,
+  'cursor-pointer px-5 py-2.5 disabled:cursor-not-allowed disabled:opacity-60'
+);
+
+const CHAPTER_PREVIEW_LIMIT = 60;
 
 function DetailSkeleton() {
   return (
-    <div className='space-y-6 animate-pulse'>
-      <section className='grid gap-6 rounded-[2rem] border border-emerald-100/80 bg-white/85 p-5 shadow-sm shadow-emerald-950/5 dark:border-emerald-500/10 dark:bg-gray-950/70 md:grid-cols-[220px_1fr]'>
-        <div className='aspect-[3/4] rounded-3xl bg-emerald-100 dark:bg-gray-800' />
+    <div className='animate-pulse space-y-6'>
+      <section
+        className={cn('grid gap-6 md:grid-cols-[220px_1fr]', PANEL_CLASS)}
+      >
+        <div className={cn('aspect-[3/4]', LIBRARY_SKELETON)} />
         <div className='space-y-4'>
-          <div className='h-8 w-2/3 rounded bg-emerald-100 dark:bg-gray-800' />
-          <div className='h-4 w-1/3 rounded bg-emerald-100 dark:bg-gray-800' />
+          <div className={cn('h-8 w-2/3', LIBRARY_SKELETON)} />
+          <div className={cn('h-4 w-1/3', LIBRARY_SKELETON)} />
           <div className='space-y-2'>
-            <div className='h-4 w-full rounded bg-emerald-100 dark:bg-gray-800' />
-            <div className='h-4 w-11/12 rounded bg-emerald-100 dark:bg-gray-800' />
-            <div className='h-4 w-10/12 rounded bg-emerald-100 dark:bg-gray-800' />
+            <div className={cn('h-4 w-full', LIBRARY_SKELETON)} />
+            <div className={cn('h-4 w-11/12', LIBRARY_SKELETON)} />
+            <div className={cn('h-4 w-10/12', LIBRARY_SKELETON)} />
           </div>
           <div className='flex gap-3'>
-            <div className='h-10 w-24 rounded-2xl bg-gray-200 dark:bg-gray-800' />
-            <div className='h-10 w-24 rounded-2xl bg-gray-200 dark:bg-gray-800' />
+            <div className={cn('h-10 w-24', LIBRARY_SKELETON)} />
+            <div className={cn('h-10 w-24', LIBRARY_SKELETON)} />
           </div>
         </div>
       </section>
@@ -119,6 +148,7 @@ export default function BookDetailPage() {
   const [chaptersError, setChaptersError] = useState('');
   const [error, setError] = useState('');
   const [fileBusy, setFileBusy] = useState<'open' | 'download' | ''>('');
+  const [showAllChapters, setShowAllChapters] = useState(false);
 
   const cached = useMemo(
     () => (sourceId && bookId ? getBookRouteCache(sourceId, bookId) : null),
@@ -240,124 +270,150 @@ export default function BookDetailPage() {
     cacheBookDetail(detail);
   };
 
-  if (error)
-    return (
-      <div className='rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-950/20 dark:text-red-300'>
-        {error}
-      </div>
-    );
+  if (error) return <EmptyState tone='error' description={error} />;
   if (!detail) return <DetailSkeleton />;
+
+  const visibleChapters = showAllChapters
+    ? chapters
+    : chapters.slice(0, CHAPTER_PREVIEW_LIMIT);
 
   return (
     <div className='space-y-6'>
-      <section className='relative overflow-hidden rounded-[2.25rem] border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-lime-50 p-5 shadow-sm shadow-emerald-950/5 dark:border-emerald-500/10 dark:from-emerald-950/30 dark:via-gray-950 dark:to-lime-950/20'>
-        <div className='absolute -right-20 -top-24 h-64 w-64 rounded-full bg-emerald-300/20 blur-3xl dark:bg-emerald-500/10' />
-        <div className='relative grid gap-6 md:grid-cols-[220px_1fr]'>
-          <div className='overflow-hidden rounded-[2rem] bg-gradient-to-br from-emerald-50 to-lime-50 shadow-xl shadow-emerald-950/10 ring-1 ring-emerald-100 dark:from-gray-900 dark:to-emerald-950/20 dark:ring-emerald-500/10'>
-            {detail.cover ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={detail.cover}
+      <section
+        className={cn('grid gap-6 md:grid-cols-[220px_1fr]', PANEL_CLASS)}
+      >
+        <div
+          className={cn(
+            'relative aspect-[3/4] overflow-hidden rounded-md bg-library-ochre-tint dark:bg-library-night-ochre-tint',
+            BOOK_COVER_LIFT
+          )}
+        >
+          {detail.cover ? (
+            <>
+              <ProxyImage
+                originalSrc={detail.cover}
                 alt={detail.title}
                 className='h-full w-full object-cover'
               />
-            ) : (
-              <div className='flex aspect-[3/4] flex-col items-center justify-center gap-2 text-sm text-emerald-500 dark:text-emerald-300'>
-                <BookOpen className='h-9 w-9' />
-                无封面
-              </div>
-            )}
-          </div>
-          <div className='flex min-w-0 flex-col justify-between gap-5'>
-            <div>
-              <div className='inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/70 px-3 py-1 text-xs font-semibold text-emerald-700 shadow-sm dark:border-emerald-500/20 dark:bg-gray-950/50 dark:text-emerald-200'>
-                <BookOpen className='h-3.5 w-3.5' />
-                {detail.sourceName}
-              </div>
-              <h1 className='mt-4 text-3xl font-black tracking-tight text-emerald-950 dark:text-emerald-50 sm:text-4xl'>
-                {detail.title}
-              </h1>
-              <div className='mt-2 text-sm font-medium text-slate-500 dark:text-slate-400'>
-                {detail.author || '未知作者'}
-              </div>
-              {detail.summary ? (
-                <div className='mt-4 line-clamp-5 text-sm leading-7 text-slate-600 dark:text-slate-300'>
-                  {detail.summary}
-                </div>
-              ) : null}
-              <div className='mt-4 flex flex-wrap gap-2'>
-                {(detail.categories || detail.tags || []).map((tag) => (
-                  <span
-                    key={tag}
-                    className='inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-200 dark:ring-emerald-500/20'
-                  >
-                    <Tags className='h-3 w-3' />
-                    {tag}
-                  </span>
-                ))}
-              </div>
+              <span className={BOOK_SPINE_OVERLAY} aria-hidden />
+            </>
+          ) : (
+            <div
+              className={cn(
+                'flex h-full flex-col items-center justify-center gap-2 text-sm',
+                LIBRARY_MUTED
+              )}
+            >
+              <BookOpen className='h-8 w-8' />
+              暂无封面
             </div>
-            <div className='flex flex-wrap gap-3'>
-              {readable ? (
-                <Link
-                  href={buildBookReadPath(detail.sourceId, detail.id)}
-                  onClick={() => cacheBookDetail(detail)}
-                  className='inline-flex cursor-pointer items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/20 transition-colors duration-200 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:focus:ring-offset-gray-950'
+          )}
+        </div>
+        <div className='flex min-w-0 flex-col justify-between gap-5'>
+          <div>
+            <span className='inline-flex items-center gap-1.5 rounded-sm bg-library-ochre-tint px-2.5 py-1 text-xs font-medium text-library-ochre dark:bg-library-night-ochre-tint dark:text-library-night-ochre'>
+              <BookOpen className='h-3.5 w-3.5' />
+              {detail.sourceName}
+            </span>
+            <h1
+              className={cn(
+                'mt-4 text-2xl font-semibold sm:text-3xl',
+                LIBRARY_TEXT,
+                LIBRARY_SERIF
+              )}
+            >
+              {detail.title}
+            </h1>
+            <div className={cn('mt-2 text-sm', LIBRARY_MUTED)}>
+              {detail.author || '未知作者'}
+            </div>
+            {detail.summary ? (
+              <div className='mt-4 line-clamp-5 text-sm leading-7 text-library-ink/80 dark:text-library-night-ink/80'>
+                {detail.summary}
+              </div>
+            ) : null}
+            <div className='mt-4 flex flex-wrap gap-2'>
+              {(detail.categories || detail.tags || []).map((tag) => (
+                <span
+                  key={tag}
+                  className={cn(
+                    'inline-flex items-center gap-1.5 rounded-sm px-2.5 py-1 text-xs font-medium',
+                    'bg-library-paper text-library-muted dark:bg-library-night dark:text-library-night-muted'
+                  )}
                 >
-                  <BookOpen className='h-4 w-4' />
-                  在线阅读
-                </Link>
-              ) : null}
+                  <Tags className='h-3 w-3' />
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className='flex flex-wrap gap-3'>
+            {readable ? (
+              <Link
+                href={buildBookReadPath(detail.sourceId, detail.id)}
+                onClick={() => cacheBookDetail(detail)}
+                className={SOLID_BUTTON_CLASS}
+              >
+                <BookOpen className='h-4 w-4' />
+                在线阅读
+              </Link>
+            ) : null}
+            <button
+              type='button'
+              onClick={toggleShelf}
+              aria-pressed={Boolean(shelf[`${detail.sourceId}+${detail.id}`])}
+              className={cn(
+                GHOST_BUTTON_CLASS,
+                shelf[`${detail.sourceId}+${detail.id}`] &&
+                  'border-transparent bg-library-ochre-tint text-library-ochre hover:border-transparent hover:text-library-ochre dark:bg-library-night-ochre-tint dark:text-library-night-ochre dark:hover:text-library-night-ochre'
+              )}
+            >
+              <BookmarkPlus className='h-4 w-4' />
+              {shelf[`${detail.sourceId}+${detail.id}`]
+                ? '移出书架'
+                : '加入书架'}
+            </button>
+            {readable && readableFormat !== 'chapters' ? (
               <button
                 type='button'
-                onClick={toggleShelf}
-                className='inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-emerald-200 bg-white/70 px-5 py-2.5 text-sm font-semibold text-emerald-800 transition-colors duration-200 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-emerald-500/20 dark:bg-gray-950/50 dark:text-emerald-100 dark:hover:bg-emerald-500/10'
+                onClick={async () => {
+                  try {
+                    setFileBusy('download');
+                    await openBookFile(
+                      detail.sourceId,
+                      detail.id,
+                      readableFormat,
+                      true,
+                      readable?.href,
+                      detail.title
+                    );
+                  } catch (err) {
+                    setError((err as Error).message || '下载文件失败');
+                  } finally {
+                    setFileBusy('');
+                  }
+                }}
+                disabled={fileBusy !== ''}
+                className={GHOST_BUTTON_CLASS}
               >
-                <BookmarkPlus className='h-4 w-4' />
-                {shelf[`${detail.sourceId}+${detail.id}`]
-                  ? '移出书架'
-                  : '加入书架'}
+                <Download className='h-4 w-4' />
+                {fileBusy === 'download' ? '下载中...' : '下载文件'}
               </button>
-              {readable && readableFormat !== 'chapters' ? (
-                <button
-                  type='button'
-                  onClick={async () => {
-                    try {
-                      setFileBusy('download');
-                      await openBookFile(
-                        detail.sourceId,
-                        detail.id,
-                        readableFormat,
-                        true,
-                        readable?.href,
-                        detail.title
-                      );
-                    } catch (err) {
-                      setError((err as Error).message || '下载文件失败');
-                    } finally {
-                      setFileBusy('');
-                    }
-                  }}
-                  disabled={fileBusy !== ''}
-                  className='inline-flex cursor-pointer items-center gap-2 rounded-2xl border border-emerald-200 bg-white/70 px-5 py-2.5 text-sm font-semibold text-emerald-800 transition-colors duration-200 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/20 dark:bg-gray-950/50 dark:text-emerald-100 dark:hover:bg-emerald-500/10'
-                >
-                  <Download className='h-4 w-4' />
-                  {fileBusy === 'download' ? '下载中...' : '下载文件'}
-                </button>
-              ) : null}
-            </div>
+            ) : null}
           </div>
         </div>
       </section>
 
-      <section className='rounded-[2rem] border border-emerald-100/80 bg-white/85 p-5 shadow-sm shadow-emerald-950/5 dark:border-emerald-500/10 dark:bg-gray-950/70'>
+      <section className={PANEL_CLASS}>
         <div className='flex items-center gap-2'>
-          <FileText className='h-5 w-5 text-emerald-600 dark:text-emerald-300' />
-          <h2 className='text-lg font-bold text-slate-950 dark:text-white'>
+          <FileText className='h-5 w-5 text-library-ochre dark:text-library-night-ochre' />{' '}
+          <h2
+            className={cn('text-lg font-semibold', LIBRARY_TEXT, LIBRARY_SERIF)}
+          >
             可用格式
           </h2>
         </div>
-        <div className='mt-4 space-y-3'>
+        <div className='mt-4 space-y-2'>
           {detail.acquisitionLinks.map((item) => {
             const type = item.type.toLowerCase();
             const format = type.includes('pdf')
@@ -371,13 +427,16 @@ export default function BookDetailPage() {
             return (
               <div
                 key={`${item.href}-${item.type}`}
-                className='flex items-center justify-between gap-4 rounded-2xl bg-emerald-50/70 px-4 py-3 text-sm ring-1 ring-emerald-100 dark:bg-emerald-500/5 dark:ring-emerald-500/10'
+                className={cn(
+                  'flex items-center justify-between gap-4 text-sm',
+                  ROW_CLASS
+                )}
               >
                 <div className='min-w-0'>
-                  <div className='truncate font-medium text-slate-900 dark:text-white'>
+                  <div className={cn('truncate font-medium', LIBRARY_TEXT)}>
                     {item.title || item.type}
                   </div>
-                  <div className='mt-1 truncate text-xs text-slate-500 dark:text-slate-400'>
+                  <div className={cn('mt-1 truncate text-xs', LIBRARY_MUTED)}>
                     {item.rel}
                   </div>
                 </div>
@@ -409,7 +468,10 @@ export default function BookDetailPage() {
                       setFileBusy('');
                     }
                   }}
-                  className='cursor-pointer rounded-full px-3 py-1.5 text-xs font-semibold text-emerald-700 transition-colors duration-200 hover:bg-white disabled:cursor-not-allowed disabled:text-gray-400 dark:text-emerald-200 dark:hover:bg-emerald-500/10'
+                  className={cn(
+                    'shrink-0 cursor-pointer rounded-sm px-3 py-1.5 text-xs font-medium text-library-ochre transition-colors duration-200 hover:bg-library-ochre-tint disabled:cursor-not-allowed disabled:text-library-muted dark:text-library-night-ochre dark:hover:bg-library-night-ochre-tint dark:disabled:text-library-night-muted',
+                    LIBRARY_FOCUS
+                  )}
                 >
                   打开
                 </button>
@@ -420,26 +482,39 @@ export default function BookDetailPage() {
       </section>
 
       {readableFormat === 'chapters' ? (
-        <section className='rounded-[2rem] border border-emerald-100/80 bg-white/85 p-5 shadow-sm shadow-emerald-950/5 dark:border-emerald-500/10 dark:bg-gray-950/70'>
+        <section className={PANEL_CLASS}>
           <div className='flex items-center justify-between gap-3'>
-            <h2 className='text-lg font-bold text-slate-950 dark:text-white'>
+            <h2
+              className={cn(
+                'text-lg font-semibold',
+                LIBRARY_TEXT,
+                LIBRARY_SERIF
+              )}
+            >
               章节目录
             </h2>
-            <div className='rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200'>
+            <div
+              className={cn(
+                'rounded-sm bg-library-paper px-3 py-1 text-sm dark:bg-library-night',
+                LIBRARY_MUTED
+              )}
+            >
               {chaptersLoading ? '加载中...' : `${chapters.length} 章`}
             </div>
           </div>
           {chaptersError ? (
-            <div className='mt-4 text-sm text-red-500'>{chaptersError}</div>
+            <div className='mt-4 text-sm text-red-600 dark:text-red-400'>
+              {chaptersError}
+            </div>
           ) : null}
           {!chaptersLoading && !chaptersError && chapters.length === 0 ? (
-            <div className='mt-4 rounded-2xl bg-lime-50 px-4 py-3 text-sm text-lime-800 dark:bg-lime-900/20 dark:text-lime-200'>
+            <div className={cn('mt-4 text-sm', ROW_CLASS, LIBRARY_MUTED)}>
               源站当前没有返回章节，这不是 EPUB 文件缺失；请换有章节的搜索结果。
             </div>
           ) : null}
           {chapters.length > 0 ? (
             <div className='mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3'>
-              {chapters.slice(0, 60).map((chapter) => (
+              {visibleChapters.map((chapter) => (
                 <Link
                   key={`${chapter.href}-${chapter.order}`}
                   href={buildBookReadPath(
@@ -448,7 +523,12 @@ export default function BookDetailPage() {
                     chapter.href
                   )}
                   onClick={() => cacheBookDetail(detail)}
-                  className='truncate rounded-2xl bg-emerald-50/70 px-4 py-3 text-sm text-slate-700 ring-1 ring-emerald-100 transition-colors duration-200 hover:bg-white hover:text-emerald-700 dark:bg-emerald-500/5 dark:text-slate-200 dark:ring-emerald-500/10 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200'
+                  className={cn(
+                    'truncate text-sm transition-colors duration-200 hover:text-library-ochre dark:hover:text-library-night-ochre',
+                    ROW_CLASS,
+                    LIBRARY_TEXT,
+                    LIBRARY_FOCUS
+                  )}
                   title={chapter.title}
                 >
                   {chapter.title}
@@ -456,10 +536,14 @@ export default function BookDetailPage() {
               ))}
             </div>
           ) : null}
-          {chapters.length > 60 ? (
-            <div className='mt-3 text-xs text-slate-500 dark:text-slate-400'>
-              仅预览前 60 章，完整目录请进入阅读页侧边栏查看。
-            </div>
+          {chapters.length > CHAPTER_PREVIEW_LIMIT && !showAllChapters ? (
+            <button
+              type='button'
+              onClick={() => setShowAllChapters(true)}
+              className={cn('mt-3', GHOST_BUTTON_CLASS)}
+            >
+              展开全部 {chapters.length} 章
+            </button>
           ) : null}
         </section>
       ) : null}

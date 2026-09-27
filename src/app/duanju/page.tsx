@@ -1,12 +1,27 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 'use client';
 
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, ChevronUp, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
+import {
+  CategoryNode,
+  getChildCategories,
+  getParentCategories,
+  isHierarchicalCategories,
+  pickDefaultSelection,
+} from '@/lib/category-tree';
 import { SearchResult } from '@/lib/types';
 
+import CapsuleSwitch from '@/components/CapsuleSwitch';
 import PageLayout from '@/components/PageLayout';
 import VideoCard from '@/components/VideoCard';
 
@@ -18,32 +33,177 @@ interface DuanjuSource {
   typeName?: string;
 }
 
+// 观影前保存的浏览快照，返回后恢复到上一步操作位置
+const DUANJU_STATE_KEY = 'duanju_state';
+
+interface DuanjuSnapshot {
+  sources: DuanjuSource[];
+  selectedSource: string;
+  categories: CategoryNode[];
+  selectedParentCategory: string;
+  selectedCategory: string;
+  videos: SearchResult[];
+  currentPage: number;
+  hasMore: boolean;
+  scrollTop: number;
+}
+
+// 实际滚动容器是 document.body，这里同时兼容 documentElement
+const getPageScrollTop = () =>
+  document.body.scrollTop || document.documentElement.scrollTop || 0;
+
+const scrollPageTo = (top: number) => {
+  document.body.scrollTop = top;
+  document.documentElement.scrollTop = top;
+};
+
+// 恢复动作需要在绘制前完成，避免闪现顶部；SSR 下退化为 useEffect
+const useIsomorphicLayoutEffect =
+  typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
+// 读取并消费快照：只在观影返回后恢复一次
+const consumeSnapshot = (): DuanjuSnapshot | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(DUANJU_STATE_KEY);
+    sessionStorage.removeItem(DUANJU_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as DuanjuSnapshot;
+    if (
+      !parsed?.selectedSource ||
+      !Array.isArray(parsed.sources) ||
+      !Array.isArray(parsed.categories) ||
+      !Array.isArray(parsed.videos) ||
+      parsed.videos.length === 0
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
 function DuanjuPageClient() {
   const [sources, setSources] = useState<DuanjuSource[]>([]);
   const [selectedSource, setSelectedSource] = useState('');
+  const [categories, setCategories] = useState<CategoryNode[]>([]);
+  const [selectedParentCategory, setSelectedParentCategory] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [videos, setVideos] = useState<SearchResult[]>([]);
   const [isLoadingSources, setIsLoadingSources] = useState(true);
   const [isLoadingVideos, setIsLoadingVideos] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const [showBackToTop, setShowBackToTop] = useState(false);
+  // 快照读取完成前不发请求，避免覆盖恢复的数据
+  const [restoreChecked, setRestoreChecked] = useState(false);
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const sourceScrollContainerRef = useRef<HTMLDivElement>(null);
+  const snapshotRef = useRef<DuanjuSnapshot | null>(null);
+  const pendingScrollTopRef = useRef<number | null>(null);
+  // 恢复时需要跳过一次「拉取分类」和「拉取列表」
+  const skipCategoryFetchRef = useRef(false);
+  const skipVideoFetchRef = useRef(false);
   const isDraggingRef = useRef(false);
   const startXRef = useRef(0);
   const scrollLeftRef = useRef(0);
 
+  // 读取观影前保存的快照，恢复到上一步操作位置
+  useIsomorphicLayoutEffect(() => {
+    const snapshot = consumeSnapshot();
+    if (snapshot) {
+      skipCategoryFetchRef.current = true;
+      skipVideoFetchRef.current = true;
+      pendingScrollTopRef.current = snapshot.scrollTop;
+      setSources(snapshot.sources);
+      setSelectedSource(snapshot.selectedSource);
+      setCategories(snapshot.categories);
+      // 旧快照没有一级分类时，从已选分类反推
+      setSelectedParentCategory(
+        snapshot.selectedParentCategory ||
+          snapshot.categories.find((item) => item.id === snapshot.selectedCategory)
+            ?.pid ||
+          ''
+      );
+      setSelectedCategory(snapshot.selectedCategory);
+      setVideos(snapshot.videos);
+      setCurrentPage(snapshot.currentPage);
+      setHasMore(snapshot.hasMore);
+    }
+    setRestoreChecked(true);
+  }, []);
+
+  // 列表渲染完成后再恢复滚动位置
+  useIsomorphicLayoutEffect(() => {
+    const target = pendingScrollTopRef.current;
+    if (target == null || videos.length === 0) return;
+
+    pendingScrollTopRef.current = null;
+    scrollPageTo(target);
+    const rafId = requestAnimationFrame(() => scrollPageTo(target));
+    return () => cancelAnimationFrame(rafId);
+  }, [videos]);
+
+  // 镜像最新状态，供跳转播放页前保存快照
   useEffect(() => {
+    snapshotRef.current = {
+      sources,
+      selectedSource,
+      categories,
+      selectedParentCategory,
+      selectedCategory,
+      videos,
+      // 当前页还在请求中，回退一页以便返回后重新拉取，避免缺页
+      currentPage: isLoadingVideos && currentPage > 1 ? currentPage - 1 : currentPage,
+      hasMore,
+      scrollTop: 0,
+    };
+  }, [
+    sources,
+    selectedSource,
+    categories,
+    selectedParentCategory,
+    selectedCategory,
+    videos,
+    currentPage,
+    hasMore,
+    isLoadingVideos,
+  ]);
+
+  // 跳转播放页前保存当前浏览位置
+  const saveSnapshot = useCallback(() => {
+    const snapshot = snapshotRef.current;
+    if (!snapshot || snapshot.videos.length === 0) return;
+    try {
+      sessionStorage.setItem(
+        DUANJU_STATE_KEY,
+        JSON.stringify({ ...snapshot, scrollTop: getPageScrollTop() })
+      );
+    } catch {
+      // 忽略 sessionStorage 写入失败（如超出配额）
+    }
+  }, []);
+
+  // 加载包含短剧分类的采集源
+  useEffect(() => {
+    if (!restoreChecked) return;
+
     const fetchSources = async () => {
       setIsLoadingSources(true);
       try {
         const response = await fetch('/api/duanju/sources');
         const data = await response.json();
         if (data.code === 200 && Array.isArray(data.data)) {
-          setSources(data.data);
-          if (data.data.length > 0) {
-            setSelectedSource(data.data[0].key);
-            setSelectedCategory(data.data[0].typeId || '');
+          const list = data.data as DuanjuSource[];
+          setSources(list);
+          // 默认选择第一个源（恢复的源仍可用时保持不变）
+          if (list.length > 0) {
+            setSelectedSource((prev) =>
+              prev && list.some((source) => source.key === prev)
+                ? prev
+                : list[0].key
+            );
           }
         }
       } catch (error) {
@@ -54,19 +214,136 @@ function DuanjuPageClient() {
     };
 
     fetchSources();
-  }, []);
+  }, [restoreChecked]);
 
   const handleSourceChange = (sourceKey: string) => {
     const source = sources.find((item) => item.key === sourceKey);
     setSelectedSource(sourceKey);
+    setCategories([]);
+    setSelectedParentCategory('');
+    // 先用采集源标记的短剧分类直接拉列表，分类加载后再细化选择
     setSelectedCategory(source?.typeId || '');
     setCurrentPage(1);
     setVideos([]);
     setHasMore(true);
   };
 
+  // 当选择的源变化时，加载该源的短剧分类（含二级分类）
   useEffect(() => {
-    if (!selectedSource || !selectedCategory) return;
+    if (!restoreChecked || !selectedSource) return;
+
+    // 恢复场景下分类与列表都来自快照，无需重新拉取
+    if (skipCategoryFetchRef.current) {
+      skipCategoryFetchRef.current = false;
+      return;
+    }
+
+    const fetchCategories = async () => {
+      try {
+        const response = await fetch(
+          `/api/duanju/categories?source=${encodeURIComponent(selectedSource)}`
+        );
+        const data = await response.json();
+        if (data.code === 200 && Array.isArray(data.data)) {
+          const list = data.data as CategoryNode[];
+          setCategories(list);
+          if (list.length === 0) {
+            setSelectedParentCategory('');
+            setSelectedCategory('');
+            return;
+          }
+
+          const ids = new Set(list.map((item) => item.id));
+          const parents = isHierarchicalCategories(list)
+            ? getParentCategories(list)
+            : [];
+          const multiParent = parents.length > 1;
+          // 默认选中采集源标记的短剧分类，没有时取列表默认项
+          const source = sources.find((item) => item.key === selectedSource);
+          const preferred = source?.typeId || '';
+
+          if (preferred && ids.has(preferred)) {
+            const preferredPid = list.find((item) => item.id === preferred)?.pid;
+            if (multiParent) {
+              const children = getChildCategories(list, preferred);
+              setSelectedParentCategory(
+                preferredPid && ids.has(preferredPid) ? preferredPid : preferred
+              );
+              // 与切换类型的行为保持一致：选中有子分类的类型时落到第一个子分类
+              setSelectedCategory(
+                children.length > 0 ? children[0].id : preferred
+              );
+            } else {
+              setSelectedParentCategory('');
+              setSelectedCategory(preferred);
+            }
+          } else {
+            const { parent, category } = pickDefaultSelection(list);
+            setSelectedParentCategory(multiParent ? parent : '');
+            setSelectedCategory(category);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load duanju categories:', error);
+        // 分类加载失败时回退到采集源标记的短剧分类，保证列表可用
+        const source = sources.find((item) => item.key === selectedSource);
+        if (source?.typeId) {
+          setSelectedParentCategory('');
+          setSelectedCategory(source.typeId);
+        }
+      }
+    };
+
+    fetchCategories();
+  }, [restoreChecked, selectedSource]);
+
+  // 切换一级分类（类型）时，落到该类型下第一个子分类并重置到第一页
+  const handleParentCategoryChange = (value: string) => {
+    setSelectedParentCategory(value);
+    setCurrentPage(1);
+    setVideos([]);
+    setHasMore(true);
+    const children = getChildCategories(categories, value);
+    setSelectedCategory(children.length > 0 ? children[0].id : value);
+  };
+
+  // 切换分类时，重置到第一页
+  const handleCategoryChange = (value: string) => {
+    setSelectedCategory(value);
+    setCurrentPage(1);
+    setVideos([]);
+    setHasMore(true);
+  };
+
+  // 分类展示形态：多个一级分类时为「类型 → 分类」联动；
+  // 只有一个一级分类时合并为单行（含一级自身，可直接浏览挂在一级下的内容）
+  const isHierarchical = isHierarchicalCategories(categories);
+  const parentCategories = isHierarchical
+    ? getParentCategories(categories)
+    : [];
+  const isMultiParent = isHierarchical && parentCategories.length > 1;
+  const subCategories =
+    isMultiParent && selectedParentCategory
+      ? getChildCategories(categories, selectedParentCategory)
+      : [];
+  const flatCategories = !isHierarchical
+    ? categories
+    : parentCategories.length === 1
+      ? [
+          parentCategories[0],
+          ...getChildCategories(categories, parentCategories[0].id),
+        ]
+      : categories;
+
+  // 当选择的分类或页码变化时，加载视频列表
+  useEffect(() => {
+    if (!restoreChecked || !selectedSource || !selectedCategory) return;
+
+    // 恢复场景下列表已来自快照，跳过本次请求
+    if (skipVideoFetchRef.current) {
+      skipVideoFetchRef.current = false;
+      return;
+    }
 
     const fetchVideos = async () => {
       setIsLoadingVideos(true);
@@ -91,10 +368,14 @@ function DuanjuPageClient() {
     };
 
     fetchVideos();
-  }, [selectedSource, selectedCategory, currentPage]);
+  }, [restoreChecked, selectedSource, selectedCategory, currentPage]);
 
+  // Intersection Observer for infinite scroll
+  // 哨兵节点仅在列表非空时渲染；快照恢复不发请求、isLoadingVideos 不翻转，
+  // 需要依赖列表出现才能（重新）挂载观察器
+  const hasVideos = videos.length > 0;
   useEffect(() => {
-    if (!loadMoreRef.current) return;
+    if (!hasVideos || !loadMoreRef.current) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -111,7 +392,33 @@ function DuanjuPageClient() {
     return () => {
       observer.disconnect();
     };
-  }, [hasMore, isLoadingVideos]);
+  }, [hasVideos, hasMore, isLoadingVideos]);
+
+  // 滚动超过一屏后显示置顶按钮
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowBackToTop(getPageScrollTop() > 300);
+    };
+
+    handleScroll();
+    document.body.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      document.body.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
+
+  // 返回顶部
+  const scrollToTop = () => {
+    try {
+      document.body.scrollTo({ top: 0, behavior: 'smooth' });
+      document.documentElement.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch {
+      scrollPageTo(0);
+    }
+  };
 
   return (
     <PageLayout activePath='/duanju'>
@@ -206,6 +513,62 @@ function DuanjuPageClient() {
           </div>
         </div>
 
+        {/* 分类选择：源有二级分类时联动展示 */}
+        {selectedSource && categories.length > 1 && (
+          <div className='max-w-4xl mx-auto mb-8'>
+            {isMultiParent ? (
+              <>
+                <div className='text-xs text-gray-500 dark:text-gray-400 mb-2 px-4'>
+                  类型
+                </div>
+                <div className='flex px-4 mb-4'>
+                  <CapsuleSwitch
+                    options={parentCategories.map((category) => ({
+                      label: category.name,
+                      value: category.id,
+                    }))}
+                    active={selectedParentCategory}
+                    onChange={handleParentCategoryChange}
+                  />
+                </div>
+                {subCategories.length > 0 && (
+                  <div>
+                    <div className='text-xs text-gray-500 dark:text-gray-400 mb-2 px-4'>
+                      分类
+                    </div>
+                    <div className='flex px-4'>
+                      <CapsuleSwitch
+                        options={subCategories.map((category) => ({
+                          label: category.name,
+                          value: category.id,
+                        }))}
+                        active={selectedCategory}
+                        onChange={handleCategoryChange}
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div>
+                <div className='text-xs text-gray-500 dark:text-gray-400 mb-2 px-4'>
+                  分类
+                </div>
+                <div className='flex px-4'>
+                  <CapsuleSwitch
+                    options={flatCategories.map((category) => ({
+                      label: category.name,
+                      value: category.id,
+                    }))}
+                    active={selectedCategory}
+                    onChange={handleCategoryChange}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {selectedSource && !selectedCategory && (
           <div className='text-center text-gray-500 py-8 dark:text-gray-400'>
             当前采集源暂无短剧分类
@@ -250,6 +613,7 @@ function DuanjuPageClient() {
                           episodes: item.episodes,
                           episodes_titles: item.episodes_titles,
                         }}
+                        onBeforeNavigate={saveSnapshot}
                       />
                     </div>
                   ))}
@@ -270,6 +634,19 @@ function DuanjuPageClient() {
           </div>
         )}
       </div>
+
+      {/* 置顶（返回顶部）悬浮按钮 */}
+      <button
+        onClick={scrollToTop}
+        className={`fixed bottom-20 md:bottom-6 right-6 z-[500] w-12 h-12 bg-green-500/90 hover:bg-green-500 text-white rounded-full shadow-lg backdrop-blur-sm transition-all duration-300 ease-in-out flex items-center justify-center group ${
+          showBackToTop
+            ? 'opacity-100 translate-y-0 pointer-events-auto'
+            : 'opacity-0 translate-y-4 pointer-events-none'
+        }`}
+        aria-label='返回顶部'
+      >
+        <ChevronUp className='w-6 h-6 transition-transform group-hover:scale-110' />
+      </button>
     </PageLayout>
   );
 }

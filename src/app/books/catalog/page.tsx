@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle } from 'lucide-react';
+import { BookX, Compass, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
@@ -19,57 +19,55 @@ import {
   buildBookDetailPath,
   cacheBookListItem,
 } from '@/lib/book-route-cache.client';
+import { cn } from '@/lib/cn';
 
-import BookCard from '@/components/books/BookCard';
+import { bookCardItem } from '@/components/media/adapters';
+import EmptyState from '@/components/media/EmptyState';
+import {
+  LIBRARY_GHOST_BUTTON,
+  LIBRARY_SKELETON,
+  SPINE_TAB,
+  SPINE_TAB_ACTIVE,
+  SPINE_TAB_IDLE,
+} from '@/components/media/library';
+import MediaCard from '@/components/media/MediaCard';
+import MediaGrid from '@/components/media/MediaGrid';
+import MediaGridSkeleton from '@/components/media/MediaGridSkeleton';
 
 function makeHref(sourceId: string, item: BookListItem) {
   return buildBookDetailPath(sourceId, item.id);
 }
 
+/** 书源 / 分类两排都是书脊标签，横向拖拽滚动，隐藏滚动条。 */
+const CHIP_ROW =
+  'flex flex-nowrap gap-1 overflow-x-auto border-b border-library-edge px-1 pt-1 cursor-grab select-none touch-pan-x [scrollbar-width:none] active:cursor-grabbing dark:border-library-night-edge [&::-webkit-scrollbar]:hidden';
+
 function CatalogSkeleton() {
   return (
-    <div className='space-y-6 animate-pulse'>
-      <div className='flex gap-2 overflow-x-auto pb-1'>
+    <div className='space-y-6'>
+      <div className='flex gap-1 overflow-x-auto pb-1'>
         {Array.from({ length: 4 }).map((_, index) => (
           <div
             key={index}
-            className='h-10 w-24 rounded-full bg-gray-200 dark:bg-gray-800'
+            className={cn('h-9 w-24 shrink-0', LIBRARY_SKELETON)}
           />
         ))}
       </div>
-      <div className='flex gap-2 overflow-x-auto pb-1'>
+      <div className='flex gap-1 overflow-x-auto pb-1'>
         {Array.from({ length: 5 }).map((_, index) => (
           <div
             key={index}
-            className='h-10 w-28 shrink-0 rounded-full bg-gray-200 dark:bg-gray-800'
+            className={cn('h-9 w-28 shrink-0', LIBRARY_SKELETON)}
           />
         ))}
       </div>
-      <div className='grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-6'>
-        {Array.from({ length: 12 }).map((_, index) => (
-          <div key={index} className='space-y-3'>
-            <div className='aspect-[3/4] rounded-2xl bg-gray-200 dark:bg-gray-800' />
-            <div className='h-4 w-3/4 rounded bg-gray-200 dark:bg-gray-800' />
-            <div className='h-3 w-1/2 rounded bg-gray-200 dark:bg-gray-800' />
-          </div>
-        ))}
-      </div>
+      <MediaGridSkeleton count={12} />
     </div>
   );
 }
 
 function LoadingMoreSkeleton() {
-  return (
-    <div className='grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-6'>
-      {Array.from({ length: 6 }).map((_, index) => (
-        <div key={index} className='space-y-3 animate-pulse'>
-          <div className='aspect-[3/4] rounded-2xl bg-gray-200 dark:bg-gray-800' />
-          <div className='h-4 w-3/4 rounded bg-gray-200 dark:bg-gray-800' />
-          <div className='h-3 w-1/2 rounded bg-gray-200 dark:bg-gray-800' />
-        </div>
-      ))}
-    </div>
-  );
+  return <MediaGridSkeleton count={6} />;
 }
 
 function isMeaningfulNavTitle(title?: string) {
@@ -273,6 +271,11 @@ export default function BooksCatalogPage() {
     if (!sourceId) return;
     void loadCatalog(href, false);
   }, [sourceId, href, loadCatalog]);
+
+  // 失败态和空目录态的「重试」都走这里：留在原页重取当前分类，不整页刷新。
+  const retryCatalog = useCallback(() => {
+    void loadCatalog(href, false);
+  }, [href, loadCatalog]);
 
   useEffect(() => {
     const node = loaderRef.current;
@@ -510,7 +513,7 @@ export default function BooksCatalogPage() {
     <div className='space-y-4'>
       <div
         ref={sourceScrollerRef}
-        className='flex flex-nowrap gap-2 overflow-x-auto px-1 pb-1.5 pt-2 cursor-grab select-none touch-pan-x active:cursor-grabbing'
+        className={CHIP_ROW}
         onPointerDown={handleSourcePointerDown}
         onPointerMove={handleSourcePointerMove}
         onPointerUp={handleSourcePointerUp}
@@ -537,22 +540,33 @@ export default function BooksCatalogPage() {
               setSelectedHref('');
               showImmediateContentLoading();
             }}
-            className={`shrink-0 cursor-pointer whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
-              source.id === selectedSourceId
-                ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/20'
-                : 'border border-emerald-100 bg-white/70 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 dark:border-emerald-500/10 dark:bg-gray-950/50 dark:text-gray-300 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200'
-            }`}
+            className={cn(
+              SPINE_TAB,
+              source.id === selectedSourceId ? SPINE_TAB_ACTIVE : SPINE_TAB_IDLE
+            )}
           >
             {source.name}
           </Link>
         ))}
       </div>
-      {data || navigationItems.length > 0 || error ? (
+      {/* 没带 sourceId 时以前会一直停在骨架屏上——那是加载态，不是「等参数」态。 */}
+      {!sourceId ? (
+        <EmptyState
+          icon={<Compass className='h-7 w-7' />}
+          title='还没有选择书源'
+          description='从电子书馆挑一个书源，再进它的目录浏览。'
+          action={
+            <Link href='/books' className={LIBRARY_GHOST_BUTTON}>
+              回到电子书馆
+            </Link>
+          }
+        />
+      ) : data || navigationItems.length > 0 || error ? (
         <>
           {navigationItems.length > 0 ? (
             <div
               ref={navScrollerRef}
-              className='flex flex-nowrap gap-2 overflow-x-auto px-1 pb-1.5 pt-2 cursor-grab select-none touch-pan-x active:cursor-grabbing'
+              className={CHIP_ROW}
               onPointerDown={handleNavPointerDown}
               onPointerMove={handleNavPointerMove}
               onPointerUp={handleNavPointerUp}
@@ -580,11 +594,12 @@ export default function BooksCatalogPage() {
                     setSelectedHref(item.href);
                     showImmediateContentLoading();
                   }}
-                  className={`shrink-0 cursor-pointer whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                  className={cn(
+                    SPINE_TAB,
                     item.href === selectedHref
-                      ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/20'
-                      : 'border border-emerald-100 bg-white/70 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 dark:border-emerald-500/10 dark:bg-gray-950/50 dark:text-gray-300 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200'
-                  }`}
+                      ? SPINE_TAB_ACTIVE
+                      : SPINE_TAB_IDLE
+                  )}
                 >
                   {item.title.trim()}
                 </Link>
@@ -592,43 +607,63 @@ export default function BooksCatalogPage() {
             </div>
           ) : null}
           {error ? (
-            <div className='flex min-h-[45vh] items-center justify-center px-4'>
-              <div className='w-full max-w-md rounded-[2rem] border border-red-200 bg-white/85 p-6 text-center shadow-xl shadow-red-950/10 backdrop-blur dark:border-red-500/20 dark:bg-gray-950/75'>
-                <div className='mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-300'>
-                  <AlertCircle className='h-6 w-6' />
-                </div>
-                <h2 className='mt-4 text-lg font-bold text-slate-950 dark:text-white'>
-                  目录加载失败
-                </h2>
-                <p className='mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400'>
-                  {error}
-                </p>
-              </div>
-            </div>
+            <EmptyState
+              tone='error'
+              title='目录加载失败'
+              description={error}
+              action={
+                <button
+                  type='button'
+                  onClick={retryCatalog}
+                  className={LIBRARY_GHOST_BUTTON}
+                >
+                  <RefreshCw className='h-4 w-4' />
+                  重试
+                </button>
+              }
+            />
           ) : loadingCatalog ? (
             <LoadingMoreSkeleton />
+          ) : entries.length === 0 ? (
+            // 请求成功但一本都没有（空分类、分页越界、或是源自己出了问题）：
+            // 以前这里渲染的是空网格，整页只剩顶上两排标签，看着就是白屏。
+            <EmptyState
+              icon={<BookX className='h-7 w-7' />}
+              title='这个分类里没有书'
+              description='换一个分类看看，或重新加载一次。'
+              action={
+                <button
+                  type='button'
+                  onClick={retryCatalog}
+                  className={LIBRARY_GHOST_BUTTON}
+                >
+                  <RefreshCw className='h-4 w-4' />
+                  重新加载
+                </button>
+              }
+            />
           ) : (
-            <section className='grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-6'>
+            <MediaGrid>
               {entries.map((item) => (
-                <BookCard
+                <MediaCard
                   key={`${item.sourceId}-${item.id}-${
                     item.detailHref || item.acquisitionLinks[0]?.href || ''
                   }`}
-                  item={item}
+                  item={bookCardItem(item)}
                   href={makeHref(sourceId, item)}
                   onNavigate={() => cacheBookListItem(item)}
                 />
               ))}
-            </section>
+            </MediaGrid>
           )}
           {loadingMore ? <LoadingMoreSkeleton /> : null}
           {!loadingMore && nextHref ? (
             <div ref={loaderRef} className='h-8 w-full' />
           ) : null}
         </>
-      ) : !error ? (
+      ) : (
         <CatalogSkeleton />
-      ) : null}
+      )}
     </div>
   );
 }

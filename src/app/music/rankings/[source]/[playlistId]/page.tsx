@@ -1,11 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Play } from 'lucide-react';
 import { useParams, useSearchParams } from 'next/navigation';
-import { playMusicList } from '@/lib/music/actions';
-import MusicLoadingIndicator from '@/components/music/MusicLoadingIndicator';
+import { useEffect, useState } from 'react';
+
+import MusicEmpty, { MusicRowListSkeleton } from '@/components/music/MusicEmpty';
+import MusicPage from '@/components/music/MusicPage';
 import SongList from '@/components/music/SongList';
-import { mapSong, normalizeSource } from '@/lib/music/shared';
+import { MUSIC_BUTTON, MUSIC_COUNT } from '@/components/music/tokens';
+import { playMusicList } from '@/lib/music/actions';
+import { mapSong, musicSources, normalizeSource } from '@/lib/music/shared';
 import type { Song } from '@/lib/music/types';
 
 export default function MusicRankingDetailPage() {
@@ -15,7 +19,8 @@ export default function MusicRankingDetailPage() {
   const playlistId = decodeURIComponent(params.playlistId);
   const title = searchParams.get('name') || '排行榜';
   const [songs, setSongs] = useState<Song[]>([]);
-  const [loading, setLoading] = useState(false);
+  // 初值 true：进页就拉曲目，给 false 会先闪一帧"这个榜单是空的"再跳成骨架。
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
@@ -26,23 +31,37 @@ export default function MusicRankingDetailPage() {
       .finally(() => setLoading(false));
   }, [source, playlistId]);
 
-  return loading ? <MusicLoadingIndicator className="py-8" /> : (
-    <div>
-      <div className="flex items-center justify-between mb-6 border-b border-white/5 pb-2">
-        <div className="flex items-center gap-3 min-w-0">
-          <h2 className="text-xl font-bold text-white/80 tracking-tight truncate max-w-md">{title}</h2>
-          <span className="text-[10px] font-bold bg-white/10 px-2 py-0.5 rounded text-white shrink-0">{songs.length} 首歌曲</span>
-        </div>
-        <button
-          onClick={() => playMusicList(songs, title)}
-          disabled={songs.length === 0}
-          className="px-3 py-1.5 bg-green-600 hover:bg-green-700 disabled:bg-zinc-700 disabled:cursor-not-allowed rounded-lg transition-colors flex items-center gap-2 text-sm text-white shrink-0"
-        >
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-          播放全部
-        </button>
-      </div>
-      <SongList songs={songs} />
-    </div>
+  const sourceLabel = musicSources.find((item) => item.key === source)?.label || source;
+
+  return (
+    <MusicPage
+      title={title}
+      subtitle={`榜单 · ${sourceLabel}`}
+      actions={
+        <>
+          <span className={MUSIC_COUNT}>{songs.length} 首</span>
+          <button
+            type='button'
+            onClick={() => playMusicList(songs, title)}
+            disabled={songs.length === 0}
+            className={MUSIC_BUTTON}
+          >
+            <Play className='h-3.5 w-3.5' strokeWidth={2.2} />
+            播放全部
+          </button>
+        </>
+      }
+    >
+      {loading ? (
+        <MusicRowListSkeleton count={10} />
+      ) : songs.length > 0 ? (
+        <SongList songs={songs} />
+      ) : (
+        <MusicEmpty
+          title='这个榜单是空的'
+          hint='当前音源无法获取此榜单的曲目，回榜单页换一个试试。'
+        />
+      )}
+    </MusicPage>
   );
 }

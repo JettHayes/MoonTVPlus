@@ -74,6 +74,8 @@ export async function GET(request: NextRequest) {
     registerBackgroundImage: config.ThemeConfig?.registerBackgroundImage || '',
     homeBackgroundImage: config.ThemeConfig?.homeBackgroundImage || '',
     progressThumbType: config.ThemeConfig?.progressThumbType || 'default',
+    loadingStyle: config.ThemeConfig?.loadingStyle || 'talisman',
+    rateBadgeStyle: config.ThemeConfig?.rateBadgeStyle || 'flag',
     progressThumbPresetId: config.ThemeConfig?.progressThumbPresetId || '',
     progressThumbCustomUrl: config.ThemeConfig?.progressThumbCustomUrl || '',
     // AI配置（只暴露功能开关，不暴露API密钥等敏感信息）

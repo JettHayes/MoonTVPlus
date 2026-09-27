@@ -3,7 +3,7 @@ import Image from 'next/image';
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-interface ActionItem {
+export interface ActionItem {
   id: string;
   label: string;
   icon: React.ReactNode;

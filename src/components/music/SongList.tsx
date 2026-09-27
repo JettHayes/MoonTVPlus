@@ -1,88 +1,171 @@
 'use client';
 
+import { Clock3, Heart, ImageOff } from 'lucide-react';
 import { useState } from 'react';
+
 import { addMusicSongToPlaylist, playMusicLater, playMusicSong } from '@/lib/music/actions';
-import { SourcePill } from '@/lib/music/shared';
+import { cn } from '@/lib/cn';
+import { songKey, useNowPlaying } from '@/lib/music/now-playing';
+import { musicSources } from '@/lib/music/shared';
 import type { Song } from '@/lib/music/types';
 
-function SongCover({ song }: { song: Song }) {
-  const [failed, setFailed] = useState(false);
-  const cover = song.pic && !failed ? song.pic : '';
+import {
+  MUSIC_ART_BROKEN,
+  MUSIC_ICON_BUTTON,
+  MUSIC_LIST,
+  MUSIC_ROW,
+  MUSIC_ROW_ACTIONS,
+  MUSIC_ROW_ART,
+  MUSIC_ROW_ARTIST,
+  MUSIC_ROW_DURATION,
+  MUSIC_ROW_INDEX,
+  MUSIC_ROW_NAME,
+  MUSIC_ROW_NAME_THEME,
+  MUSIC_ROW_PLAYING,
+  MUSIC_ROW_SOURCE,
+  MUSIC_ROW_TEXT,
+} from './tokens';
+
+/** 时长：接口给的格式不统一（有的 "04:29"、有的就是秒数），能认的都认。 */
+function formatDuration(song: Song): string {
+  const text = song.durationText ? String(song.durationText) : '';
+  if (/^\d+:\d{2}$/.test(text)) return text;
+
+  const seconds = Number(song.duration) || Number(text) || 0;
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  const minutes = Math.floor(seconds / 60);
+  return `${String(minutes).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+}
+
+function sourceLabel(platform?: string): string {
+  return musicSources.find((item) => item.key === platform)?.label || '';
+}
+
+/**
+ * 歌曲行。封面是一张圆盘——外壳是盘，中间的封面是标签，盘上一道会转的高光；
+ * 正在播放那一条盘转起来、左缘起一道主题色、歌名转主题色。
+ *
+ * 正在播放的判断是"够用"而不是"准确"的，见 src/lib/music/now-playing.ts。
+ */
+function SongRow({
+  song,
+  index,
+  nowPlaying,
+  extraActions,
+}: {
+  song: Song;
+  index: number;
+  /** 当前播放曲目的 key，由 SongList 统一读一次，别每行各订一份。 */
+  nowPlaying: string | null;
+  /** 行尾追加的动作（"我的歌单"里的移除）。渲染在同一格里，不改列数。 */
+  extraActions?: React.ReactNode;
+}) {
+  const [coverFailed, setCoverFailed] = useState(false);
+
+  const playing = nowPlaying !== null && nowPlaying === songKey(song);
+  const cover = song.pic && !coverFailed ? song.pic : '';
+  const duration = formatDuration(song);
+  const label = sourceLabel(song.platform);
 
   return (
-    <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-white/10 shadow-inner">
-      {cover ? (
-        <img
-          src={cover}
-          alt={`${song.name} 封面`}
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          onError={() => setFailed(true)}
-          className="h-full w-full object-cover"
-        />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center text-zinc-500">
-          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 19V6l12-2v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2Zm12-2c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2Z" />
-          </svg>
-        </div>
-      )}
+    <div
+      role='button'
+      tabIndex={0}
+      aria-current={playing ? 'true' : undefined}
+      onClick={() => playMusicSong(song, index)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          playMusicSong(song, index);
+        }
+      }}
+      className={cn(MUSIC_ROW, playing && MUSIC_ROW_PLAYING)}
+    >
+      <span className={MUSIC_ROW_INDEX}>{String(index + 1).padStart(2, '0')}</span>
+
+      <span className={MUSIC_ROW_ART}>
+        {cover ? (
+          <img
+            src={cover}
+            alt=''
+            loading='lazy'
+            referrerPolicy='no-referrer'
+            onError={() => setCoverFailed(true)}
+            className='h-full w-full object-cover'
+          />
+        ) : (
+          // 歌曲的封面和歌单一样是实打实给的，走到这儿只有一个原因：图挂了。
+          // 所以是一个破图记号，不是"这个位置该有张图"的留白（那是热榜套面的事）。
+          <span className={MUSIC_ART_BROKEN}>
+            <ImageOff className='h-3.5 w-3.5' strokeWidth={1.6} />
+          </span>
+        )}
+      </span>
+
+      <span className={MUSIC_ROW_TEXT}>
+        <span className={cn(MUSIC_ROW_NAME, playing && MUSIC_ROW_NAME_THEME)}>
+          {song.name}
+        </span>
+        <span className={MUSIC_ROW_ARTIST}>{song.artist}</span>
+      </span>
+
+      <span className={MUSIC_ROW_DURATION}>{duration}</span>
+      <span className={MUSIC_ROW_SOURCE}>{label}</span>
+
+      <span className={MUSIC_ROW_ACTIONS}>
+        <button
+          type='button'
+          title='添加到歌单'
+          aria-label='添加到歌单'
+          onClick={(event) => {
+            event.stopPropagation();
+            addMusicSongToPlaylist(song);
+          }}
+          className={MUSIC_ICON_BUTTON}
+        >
+          <Heart className='h-3.5 w-3.5' strokeWidth={1.9} />
+        </button>
+        <button
+          type='button'
+          title='稍后播放'
+          aria-label='稍后播放'
+          onClick={(event) => {
+            event.stopPropagation();
+            playMusicLater(song);
+          }}
+          className={MUSIC_ICON_BUTTON}
+        >
+          <Clock3 className='h-3.5 w-3.5' strokeWidth={1.9} />
+        </button>
+        {extraActions}
+      </span>
     </div>
   );
 }
 
-export default function SongList({ songs }: { songs: Song[] }) {
+export default function SongList({
+  songs,
+  extraActions,
+}: {
+  songs: Song[];
+  /** 每行都要追加的一个动作，见 SongRow。 */
+  extraActions?: (song: Song, index: number) => React.ReactNode;
+}) {
+  // 整张列表只订一次"正在播放"，不要每行各订一份。
+  const nowPlaying = useNowPlaying();
+
+  if (songs.length === 0) return null;
+
   return (
-    <div className="space-y-1">
+    <div className={MUSIC_LIST}>
       {songs.map((song, index) => (
-        <div
+        <SongRow
           key={`${song.platform}-${song.id}-${index}`}
-          className="grid grid-cols-[32px_44px_1fr_auto_auto] md:grid-cols-[44px_48px_2fr_1fr_auto_auto] items-center gap-2 px-3 py-3 rounded-lg cursor-pointer transition-all hover:bg-white/5"
-        >
-          <div className="text-center text-zinc-500 dark:text-zinc-300 text-sm" onClick={() => playMusicSong(song, index)}>
-            {index + 1}
-          </div>
-          <div onClick={() => playMusicSong(song, index)}>
-            <SongCover song={song} />
-          </div>
-          <div className="min-w-0" onClick={() => playMusicSong(song, index)}>
-            <div className="text-sm font-medium text-white truncate">{song.name}</div>
-            <div className="text-xs text-zinc-500 truncate md:hidden">{song.artist}</div>
-          </div>
-          <div className="hidden md:block text-sm text-zinc-400 truncate" onClick={() => playMusicSong(song, index)}>
-            {song.artist}
-          </div>
-          <div className="flex items-center" onClick={() => playMusicSong(song, index)}>
-            <SourcePill source={song.platform} />
-          </div>
-          <div className="flex flex-col items-center justify-center gap-0.5 leading-none">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                addMusicSongToPlaylist(song);
-              }}
-              className="text-zinc-500 hover:text-red-500 transition-colors p-0.5"
-              title="添加到歌单"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-              </svg>
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                playMusicLater(song);
-              }}
-              className="text-zinc-500 hover:text-green-500 transition-colors p-0.5"
-              title="稍后播放"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-9-9 9 9 0 019 9z" />
-              </svg>
-            </button>
-          </div>
-        </div>
+          song={song}
+          index={index}
+          nowPlaying={nowPlaying}
+          extraActions={extraActions?.(song, index)}
+        />
       ))}
     </div>
   );

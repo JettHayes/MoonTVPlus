@@ -1,0 +1,108 @@
+/*
+ * 音乐外壳的地面，和整套 --music-* 变量。
+ *
+ * **必须进 SSR 的样式表**，所以放在这个 css 文件（由 app/music/layout.tsx import），
+ * 而不是 MusicClient 里的 <style jsx global>：App Router 不 SSR styled-jsx（仓库里没有
+ * StyleRegistry / useServerInsertedHTML，Next 只在 pages-router 那条路上接了它），那段
+ * 样式要等 hydration 之后才由 JS 插进 head。
+ *
+ * 地面晚到一步的后果：首帧只有外壳上兜底的 Tailwind 类（原来是 bg-zinc-950）→ 先黑一下，
+ * JS 到了才切回渐变。dev 的 hydration 是未打包 + 按需编译，慢到肉眼能看清；prod 只闪一下。
+ * 所以外壳上的兜底类已经撤了：这一份就是第一帧的地面，不需要兜底。
+ *
+ * 那些 !important 保留原样——它们压的是元素自己身上的 Tailwind 工具类，跟谁先谁后无关，
+ * 别因为"看起来多余"就删。
+ */
+
+:root {
+  --music-bg: #f4f7fb;
+  --music-bg-strong: rgba(255, 255, 255, 0.96);
+  --music-surface: rgba(255, 255, 255, 0.88);
+  --music-surface-soft: rgba(241, 245, 249, 0.92);
+  --music-overlay: rgba(15, 23, 42, 0.45);
+  --music-glass: rgba(15, 23, 42, 0.06);
+  --music-glass-strong: rgba(15, 23, 42, 0.1);
+  --music-border: rgba(148, 163, 184, 0.28);
+  --music-text: #0f172a;
+  --music-text-soft: #475569;
+  --music-text-muted: #64748b;
+}
+
+.dark {
+  --music-bg: #09090b;
+  --music-bg-strong: rgba(9, 9, 11, 0.95);
+  --music-surface: rgba(24, 24, 27, 0.9);
+  --music-surface-soft: rgba(39, 39, 42, 0.88);
+  --music-overlay: rgba(0, 0, 0, 0.72);
+  --music-glass: rgba(255, 255, 255, 0.05);
+  --music-glass-strong: rgba(255, 255, 255, 0.1);
+  --music-border: rgba(255, 255, 255, 0.1);
+  --music-text: #f8fafc;
+  --music-text-soft: #cbd5e1;
+  --music-text-muted: #94a3b8;
+}
+
+.music-theme {
+  background: linear-gradient(180deg, var(--music-bg) 0%, color-mix(in srgb, var(--music-bg) 82%, #22c55e 18%) 100%);
+  color: var(--music-text);
+}
+
+.music-theme :is([class*='bg-zinc-950'], [class*='bg-zinc-900']),
+.music-theme-portal :is([class*='bg-zinc-950'], [class*='bg-zinc-900']) {
+  background-color: var(--music-bg-strong) !important;
+}
+
+.music-theme [class*='bg-zinc-800'],
+.music-theme-portal [class*='bg-zinc-800'] {
+  background-color: var(--music-surface-soft) !important;
+}
+
+.music-theme :is([class*='bg-white/5'], [class*='bg-white/6'], [class*='bg-white/8'], [class*='bg-white/10'], [class*='bg-white/12']),
+.music-theme-portal :is([class*='bg-white/5'], [class*='bg-white/6'], [class*='bg-white/8'], [class*='bg-white/10'], [class*='bg-white/12']) {
+  background-color: var(--music-glass) !important;
+}
+
+.music-theme [class*='bg-white/20'],
+.music-theme-portal [class*='bg-white/20'] {
+  background-color: var(--music-glass-strong) !important;
+}
+
+.music-theme :is([class*='bg-black/90'], [class*='bg-black/50'], [class*='bg-black/30']),
+.music-theme-portal :is([class*='bg-black/90'], [class*='bg-black/50'], [class*='bg-black/30']) {
+  background-color: var(--music-overlay) !important;
+}
+
+.music-theme :is([class*='border-white/'], [class*='border-zinc-']),
+.music-theme-portal :is([class*='border-white/'], [class*='border-zinc-']) {
+  border-color: var(--music-border) !important;
+}
+
+.music-theme :is([class*='text-white'], [class*='text-zinc-200']),
+.music-theme-portal :is([class*='text-white'], [class*='text-zinc-200']) {
+  color: var(--music-text) !important;
+}
+
+.music-theme :is([class*='text-zinc-300'], [class*='text-zinc-400']),
+.music-theme-portal :is([class*='text-zinc-300'], [class*='text-zinc-400']) {
+  color: var(--music-text-soft) !important;
+}
+
+.music-theme :is([class*='text-zinc-500'], [class*='text-zinc-600']),
+.music-theme-portal :is([class*='text-zinc-500'], [class*='text-zinc-600']) {
+  color: var(--music-text-muted) !important;
+}
+
+.music-theme :is([class*='from-zinc-800'], [class*='from-zinc-900']) {
+  --tw-gradient-from: var(--music-surface-soft) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgb(255 255 255 / 0) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.music-theme :is([class*='to-zinc-900'], [class*='to-zinc-800']) {
+  --tw-gradient-to: var(--music-bg-strong) var(--tw-gradient-to-position) !important;
+}
+
+.music-theme input::placeholder,
+.music-theme textarea::placeholder {
+  color: var(--music-text-muted) !important;
+}

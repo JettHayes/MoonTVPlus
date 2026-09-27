@@ -214,6 +214,63 @@ export async function getTVSeasonDetails(
 }
 
 /**
+ * TMDB 集数剧照
+ */
+export interface TMDBEpisodeStill {
+  file_path: string;
+  width: number;
+  height: number;
+  aspect_ratio?: number;
+  vote_average?: number;
+  vote_count?: number;
+}
+
+/**
+ * 获取电视剧某一集的剧照
+ */
+export async function getTVEpisodeImages(
+  apiKey: string,
+  tvId: number,
+  seasonNumber: number,
+  episodeNumber: number,
+  proxy?: string,
+  reverseProxyBaseUrl?: string
+): Promise<{ code: number; stills: TMDBEpisodeStill[] | null }> {
+  try {
+    const actualKey = getNextApiKey(apiKey);
+    if (!actualKey) {
+      return { code: 400, stills: null };
+    }
+
+    const baseUrl = reverseProxyBaseUrl || DEFAULT_TMDB_BASE_URL;
+    const url = `${baseUrl}/3/tv/${tvId}/season/${seasonNumber}/episode/${episodeNumber}/images?api_key=${actualKey}`;
+
+    const response = await universalFetch(url, proxy);
+
+    if (!response.ok) {
+      console.error('TMDB 获取集数剧照失败:', response.status, response.statusText);
+      return { code: response.status, stills: null };
+    }
+
+    const data = (await response.json()) as { stills?: TMDBEpisodeStill[] };
+
+    const stills = (data.stills || []).sort((a, b) => {
+      const voteDiff = (b.vote_average || 0) - (a.vote_average || 0);
+      if (voteDiff !== 0) return voteDiff;
+      return (b.vote_count || 0) - (a.vote_count || 0);
+    });
+
+    return {
+      code: 200,
+      stills,
+    };
+  } catch (error) {
+    console.error('TMDB 获取集数剧照异常:', error);
+    return { code: 500, stills: null };
+  }
+}
+
+/**
  * 获取 TMDB 图片完整 URL
  */
 export function getTMDBImageUrl(

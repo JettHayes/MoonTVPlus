@@ -65,14 +65,16 @@ function isJsRuleString(value?: string) {
   return /^(?:@js:|<js>)/i.test(trimmed) || /<js>[\s\S]*?<\/js>/i.test(trimmed);
 }
 
-function resolveLegadoDynamicValue(value: any, context: Record<string, any>, timeout = 1000): any {
-  if (Array.isArray(value)) return value.map((item) => resolveLegadoDynamicValue(item, context, timeout));
+function resolveLegadoDynamicValue(value: any, context: Record<string, any>, timeout = 1000, evaluateJs = false): any {
+  if (Array.isArray(value)) return value.map((item) => resolveLegadoDynamicValue(item, context, timeout, evaluateJs));
   if (!value || typeof value !== 'object') {
     if (typeof value !== 'string') return value;
-    if (!isJsRuleString(value)) return value;
+    // 规范化书源时只做浅层搬移，不求值动态规则：此时上下文里没有 key/page/result，
+    // 强行执行只会把规则清空（见 resolveLegadoSource）。JS 规则留到真正请求时求值。
+    if (!evaluateJs || !isJsRuleString(value)) return value;
     return evaluateJsRuleString(value, context, timeout);
   }
-  return Object.fromEntries(Object.entries(value).map(([key, val]) => [key, resolveLegadoDynamicValue(val, context, timeout)]));
+  return Object.fromEntries(Object.entries(value).map(([key, val]) => [key, resolveLegadoDynamicValue(val, context, timeout, evaluateJs)]));
 }
 
 function evaluateJsRuleString(value: string, context: Record<string, any>, timeout = 1000) {
@@ -95,7 +97,7 @@ function parseHeaderLines(raw: string, context: Record<string, any>) {
 
 function asObjectHeader(value?: string | Record<string, string>, context?: Record<string, any>): Record<string, string> {
   if (!value) return {};
-  if (typeof value === 'object') return resolveLegadoDynamicValue(value, context || {});
+  if (typeof value === 'object') return resolveLegadoDynamicValue(value, context || {}, 1000, true);
   let raw = value.trim();
   if (isJsRuleString(raw)) {
     raw = evaluateJsRuleString(raw, context || {});
@@ -103,7 +105,7 @@ function asObjectHeader(value?: string | Record<string, string>, context?: Recor
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return {};
-    return resolveLegadoDynamicValue(parsed, context || {});
+    return resolveLegadoDynamicValue(parsed, context || {}, 1000, true);
   } catch {
     return parseHeaderLines(raw, context || {});
   }
@@ -316,35 +318,34 @@ function runJsSnippetRaw(code: string, context: Record<string, any>, timeout = 1
     console: { log: () => undefined },
   };
   const body = unwrapJsRule(code);
-  try {
-    const script = new vm.Script(`(function(){ ${body}\n})()`);
-    const result = script.runInNewContext(sandbox, { timeout });
-    if (result !== undefined && result !== null && result !== '') return result;
-    if (sandbox.result !== context.result && sandbox.result !== undefined && sandbox.result !== null && sandbox.result !== '') return sandbox.result;
-    if (lastPut?.key === 'url') return lastPut.value;
-  } catch {
-    // 如果 @js 后面是单个表达式（例如 header: @js:JSON.stringify({...})），上面的函数体不会自动返回。
+  const runAttempt = (wrapper: string): any => {
+    try {
+      const script = new vm.Script(wrapper);
+      const result = script.runInNewContext(sandbox, { timeout });
+      if (result !== undefined && result !== null && result !== '') return result;
+      if (sandbox.result !== context.result && sandbox.result !== undefined && sandbox.result !== null && sandbox.result !== '') return sandbox.result;
+      if (lastPut?.key === 'url') return lastPut.value;
+    } catch {
+      // 换下一种包装方式重试
+    }
+    return undefined;
+  };
+  // 1) 整段脚本，脚本自己 return
+  let value = runAttempt(`(function(){ ${body}\n})()`);
+  if (value !== undefined) return value;
+  // 2) 脚本通过 res 返回（部分源的约定）
+  value = runAttempt(`(function(){ ${body}\n; if (typeof res !== 'undefined') return res; return ''; })()`);
+  if (value !== undefined) return value;
+  // 3) 整段就是一个表达式（例如 header 的 @js:JSON.stringify({...})）
+  value = runAttempt(`(function(){ return (${body.replace(/;\s*$/, '')}); })()`);
+  if (value !== undefined) return value;
+  // 4) 多语句脚本且最后一条语句是表达式：Rhino/legado 会用它的值作为结果
+  const tail = body.match(/(?:^|[;\n])\s*((?!(?:var|let|const|return|if|for|while|function|throw|switch|try|new|do|else|break|continue)\b)[^\n;]+?)\s*;?\s*$/);
+  if (tail) {
+    value = runAttempt(`(function(){ ${body}\n; return (${tail[1]}); })()`);
+    if (value !== undefined) return value;
   }
-  try {
-    const script = new vm.Script(`(function(){ ${body}
-; if (typeof res !== 'undefined') return res; return ''; })()`);
-    const result = script.runInNewContext(sandbox, { timeout });
-    if (result !== undefined && result !== null && result !== '') return result;
-    if (sandbox.result !== context.result && sandbox.result !== undefined && sandbox.result !== null && sandbox.result !== '') return sandbox.result;
-    if (lastPut?.key === 'url') return lastPut.value;
-  } catch {
-    // fallback to expression mode below
-  }
-  try {
-    const script = new vm.Script(`(function(){ return (${body}); })()`);
-    const result = script.runInNewContext(sandbox, { timeout });
-    if (result !== undefined && result !== null && result !== '') return result;
-    if (sandbox.result !== context.result && sandbox.result !== undefined && sandbox.result !== null && sandbox.result !== '') return sandbox.result;
-    if (lastPut?.key === 'url') return lastPut.value;
-    return '';
-  } catch {
-    return '';
-  }
+  return '';
 }
 
 function runJsSnippet(code: string, context: Record<string, any>, timeout = 1000): string {
@@ -632,20 +633,53 @@ function readRegexItem(item: Record<string, string>, rule?: string, baseUrl?: st
   return value;
 }
 
+// 裸 token 出现在 @ 之后时，是「取属性」还是「再往下找标签」是二义的。
+// legado 的规则里两者都常见：`a@href` 取属性，`id.chapter-list@a` 取子标签。
+// 这里用标签名白名单区分，其余（onclick/data-src/style…）一律当属性。
+const HTML_TAG_TOKENS = new Set([
+  'a', 'abbr', 'article', 'aside', 'b', 'blockquote', 'br', 'button', 'caption', 'code', 'dd', 'del',
+  'div', 'dl', 'dt', 'em', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'header', 'hr', 'i', 'img', 'input', 'ins', 'label', 'li', 'main', 'nav', 'ol', 'option', 'p', 'pre',
+  'section', 'select', 'small', 'span', 'strong', 'sub', 'sup', 'table', 'tbody', 'td', 'textarea',
+  'tfoot', 'th', 'thead', 'tr', 'u', 'ul', 'video', 'audio', 'source', 'iframe',
+]);
+
 function isLegadoAttrToken(value: string) {
-  return /^(href|src|title|alt|text|textNodes|ownText|all|html|content|value|data-[\w-]+)$/i.test(value.trim());
+  const token = value.trim();
+  if (/^(text|textNodes|ownText|all|html|content)$/i.test(token)) return true;
+  if (!/^[A-Za-z_][\w:-]*$/.test(token)) return false;
+  return !HTML_TAG_TOKENS.has(token.toLowerCase());
+}
+
+// CSS 标识符转义：Tailwind 类名里带 : / . / [ ] 等字符（如 hover:text-primary），
+// 直接当选择器用会抛 Unknown pseudo-class。
+function cssEscapeIdent(value: string) {
+  const escaped = value.replace(/[^A-Za-z0-9_-]/g, (char) => `\\${char}`);
+  return escaped.replace(/^(\d)/, '\\3$1 ');
+}
+
+// 摘掉 legado 的索引后缀（.0 / [0] / !0 / [0:2]），返回主体与后缀以便原样接回选择器。
+function splitLegadoIndexSuffix(value: string) {
+  const match = value.match(/(?:\[-?\d*(?::-?\d+)?(?::\d+)?\]|!-?\d+|\.-?\d+)$/);
+  if (!match) return { body: value, suffix: '' };
+  return { body: value.slice(0, match.index), suffix: value.slice(match.index) };
 }
 
 function normalizeLegadoSelector(selector: string) {
   const trimmed = selector.trim();
   if (!trimmed) return '';
-  const classMatch = trimmed.match(/^class\.([\w-]+(?:\.[\w-]+)*)$/i);
-  if (classMatch) return classMatch[1].split('.').map((item) => `.${item}`).join('');
-  const idMatch = trimmed.match(/^id\.([\w-]+)$/i);
-  if (idMatch) return `#${idMatch[1]}`;
-  const tagMatch = trimmed.match(/^tag\.([\w-]+)$/i);
-  if (tagMatch) return tagMatch[1];
-  return trimmed;
+  const prefixed = trimmed.match(/^(class|tag|id)\.([\s\S]+)$/i);
+  if (!prefixed) return trimmed;
+  const kind = prefixed[1].toLowerCase();
+  const { body, suffix } = splitLegadoIndexSuffix(prefixed[2]);
+  const names = body.split(/[\s.]+/).filter(Boolean);
+  if (names.length === 0) return '';
+  if (kind === 'id') return `#${cssEscapeIdent(names[0])}${suffix}`;
+  if (kind === 'tag') {
+    const [tag, ...classes] = names;
+    return `${tag}${classes.map((name) => `.${cssEscapeIdent(name)}`).join('')}${suffix}`;
+  }
+  return names.map((name) => `.${cssEscapeIdent(name)}`).join('') + suffix;
 }
 
 function parseStep(step: string): { selector: string; attr: string } {
@@ -676,12 +710,33 @@ function stripFilters(rule: string) {
   return splitRuleFilters(stripRuleJsBlocks(rule)).base;
 }
 
+// legado 的选择器作用于 element.getAllElements()，即包含当前节点自身。
+// 只 find 子孙节点会让 `tag.div.xxx@onclick` 这类「卡片自身带属性」的规则永远取不到值。
+function findWithSelf(current: cheerio.Cheerio<any>, selector: string): cheerio.Cheerio<any> {
+  if (!selector) return current;
+  let self: cheerio.Cheerio<any>;
+  try {
+    self = current.filter(selector);
+  } catch {
+    self = current.filter(() => false);
+  }
+  let descendants: cheerio.Cheerio<any>;
+  try {
+    descendants = current.find(selector);
+  } catch {
+    return self;
+  }
+  if (self.length === 0) return descendants;
+  if (descendants.length === 0) return self;
+  return self.add(descendants);
+}
+
 function applyLegadoIndexSelector(current: cheerio.Cheerio<any>, selector: string): { current: cheerio.Cheerio<any>; selector: string } {
   let normalized = selector.trim();
   const exclude = normalized.match(/(?:\[!(-?\d+)\]|!(-?\d+))$/);
   if (exclude) {
     normalized = normalized.slice(0, exclude.index).trim();
-    current = normalized ? current.find(normalized) : current;
+    current = normalized ? findWithSelf(current, normalized) : current;
     const idx = Number(exclude[1] ?? exclude[2]);
     const real = idx < 0 ? current.length + idx : idx;
     return { current: current.filter((index) => index !== real), selector: '' };
@@ -689,7 +744,7 @@ function applyLegadoIndexSelector(current: cheerio.Cheerio<any>, selector: strin
   const range = normalized.match(/(?:\[(-?\d*):(-?\d*)(?::(-?\d+))?\]|\.(-?\d*):(-?\d*)(?::(-?\d+))?)$/);
   if (range) {
     normalized = normalized.slice(0, range.index).trim();
-    current = normalized ? current.find(normalized) : current;
+    current = normalized ? findWithSelf(current, normalized) : current;
     const length = current.length;
     const startRaw = range[1] ?? range[4];
     const endRaw = range[2] ?? range[5];
@@ -704,7 +759,7 @@ function applyLegadoIndexSelector(current: cheerio.Cheerio<any>, selector: strin
   const indexMatch = normalized.match(/(?:\[(-?\d+)\]|\.(-?\d+))$/);
   if (indexMatch) {
     normalized = normalized.slice(0, indexMatch.index).trim();
-    current = normalized ? current.find(normalized) : current;
+    current = normalized ? findWithSelf(current, normalized) : current;
     const idx = Number(indexMatch[1] ?? indexMatch[2]);
     const real = idx < 0 ? current.length + idx : idx;
     return { current: current.eq(real), selector: '' };
@@ -718,9 +773,9 @@ function applyLegadoSelector($: cheerio.CheerioAPI, current: cheerio.Cheerio<any
   const textMatch = normalized.match(/^text\.(.+)$/);
   if (textMatch) {
     const keyword = textMatch[1].trim();
-    const links = current.find('a[href]').filter((_, el) => $(el).text().includes(keyword));
+    const links = findWithSelf(current, 'a[href]').filter((_, el) => $(el).text().includes(keyword));
     if (links.length > 0) return links;
-    return current.find('button,span,div,p,li,a').filter((_, el) => $(el).text().includes(keyword));
+    return findWithSelf(current, 'button,span,div,p,li,a').filter((_, el) => $(el).text().includes(keyword));
   }
   const tokens = normalized.split(/\s+/).filter(Boolean);
   if (
@@ -731,12 +786,12 @@ function applyLegadoSelector($: cheerio.CheerioAPI, current: cheerio.Cheerio<any
     let next = current;
     for (const token of tokens) {
       const indexed = applyLegadoIndexSelector(next, token);
-      next = indexed.selector ? next.find(indexed.selector) : indexed.current;
+      next = indexed.selector ? findWithSelf(next, indexed.selector) : indexed.current;
     }
     return next;
   }
   const indexed = applyLegadoIndexSelector(current, normalized);
-  return indexed.selector ? current.find(indexed.selector) : indexed.current;
+  return indexed.selector ? findWithSelf(current, indexed.selector) : indexed.current;
 }
 
 function selectElements($: cheerio.CheerioAPI, root: cheerio.Cheerio<any>, rule?: string): cheerio.Cheerio<any> {
@@ -808,11 +863,11 @@ function selectXPath($: cheerio.CheerioAPI, root: cheerio.Cheerio<any>, rule: st
   return { nodes: parts.length ? root.find(parts.join(' ')) : root, attr };
 }
 
-function readValue($: cheerio.CheerioAPI, root: cheerio.Cheerio<any>, rule?: string, baseUrl?: string, jsContext?: Record<string, any>): string {
+function readValue($: cheerio.CheerioAPI, root: cheerio.Cheerio<any>, rule?: string, baseUrl?: string, jsContext?: Record<string, any>, rawUrl = false): string {
   for (const alternative of splitAlternatives(rule)) {
     const templateKind = alternative.match(/\{\{\s*@@([\s\S]*?)\}\}/);
     if (templateKind) {
-      const value = alternative.replace(/\{\{\s*@@([\s\S]*?)\}\}/g, (_, innerRule) => readValue($, root, String(innerRule).trim(), baseUrl, jsContext));
+      const value = alternative.replace(/\{\{\s*@@([\s\S]*?)\}\}/g, (_, innerRule) => readValue($, root, String(innerRule).trim(), baseUrl, jsContext, rawUrl));
       if (value) return value;
       continue;
     }
@@ -823,18 +878,41 @@ function readValue($: cheerio.CheerioAPI, root: cheerio.Cheerio<any>, rule?: str
       continue;
     }
     if (isJsRuleString(alternative)) {
+      const blockIndex = alternative.search(/<js>/i);
+      // `选择器@属性<js>…</js>`：legado 会先按选择器取值，再把值作为 result 执行 JS。
+      // 必须先于下面的整段求值分支处理，否则带 <js> 的规则会丢掉前半段选择器。
+      // 取值用原始属性（不走 URL 绝对化）：源站的 JS 常自己拼域名，先绝对化会拼出两个域名。
+      if (blockIndex > 0) {
+        const selectorRule = alternative.slice(0, blockIndex).trim();
+        const blocks = Array.from(alternative.slice(blockIndex).matchAll(/<js>([\s\S]*?)<\/js>/gi));
+        if (selectorRule && !/@js:/i.test(selectorRule)) {
+          let value = readValue($, root, selectorRule, baseUrl, jsContext, true);
+          for (const block of blocks) {
+            value = runJsSnippet(block[1], { ...(jsContext || {}), result: value, src: value, baseUrl });
+          }
+          if (value) {
+            if (/,(\s*)\{/.test(value)) return value;
+            return /^(?:https?:)?\/\//i.test(value) || value.startsWith('/') ? normalizeUrl(baseUrl || '', value) : value;
+          }
+          continue;
+        }
+      }
       const transformed = evaluateJsRuleString(alternative, { ...(jsContext || {}), result: $.html(root), src: $.html(root), baseUrl });
-      if (transformed) return /^(?:https?:)?\/\//i.test(transformed) || transformed.startsWith('/') ? normalizeUrl(baseUrl || '', transformed) : transformed;
+      if (transformed) {
+        if (rawUrl) return transformed;
+        return /^(?:https?:)?\/\//i.test(transformed) || transformed.startsWith('/') ? normalizeUrl(baseUrl || '', transformed) : transformed;
+      }
       continue;
     }
     const jsIndex = alternative.indexOf('@js:');
     if (jsIndex > 0) {
       const selectorRule = alternative.slice(0, jsIndex).trim();
       const jsRule = alternative.slice(jsIndex).trim();
-      const selected = readValue($, root, selectorRule, baseUrl, jsContext);
+      const selected = readValue($, root, selectorRule, baseUrl, jsContext, rawUrl);
       const transformed = runJsSnippet(jsRule, { ...(jsContext || {}), result: selected, src: selected, baseUrl });
       if (transformed) {
         if (/,(\s*)\{/.test(transformed)) return transformed;
+        if (rawUrl) return transformed;
         return /^(?:https?:)?\/\//i.test(transformed) || transformed.startsWith('/') ? normalizeUrl(baseUrl || '', transformed) : transformed;
       }
       if (selected) return selected;
@@ -882,7 +960,7 @@ function readValue($: cheerio.CheerioAPI, root: cheerio.Cheerio<any>, rule?: str
     else if (normalizedAttr === 'html') value = node.html() || '';
     else value = node.attr(attr) || '';
     value = he.decode(value || '').replace(/\u00a0/g, ' ').trim();
-    if ((normalizedAttr === 'href' || normalizedAttr === 'src') && value && baseUrl) value = normalizeUrl(baseUrl, value);
+    if (!rawUrl && (normalizedAttr === 'href' || normalizedAttr === 'src') && value && baseUrl) value = normalizeUrl(baseUrl, value);
     value = applyRuleFilters(value, splitRuleFilters(alternative).filters);
     value = applyPutGetRules(alternative, value);
     if (value) return value;

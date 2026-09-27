@@ -1,5 +1,5 @@
 export const CUSTOM_SUBTITLE_ACCEPT =
-  '.vtt,.srt,.ass,.ssa,.ttml,.dfxp,.xml,.sbv,.sub,.lrc';
+  '.vtt,.srt,.ass,.ssa,.ttml,.dfxp,.xml,.sbv,.sub,.lrc,.sup,.pgs';
 
 export interface ConvertedSubtitle {
   name: string;

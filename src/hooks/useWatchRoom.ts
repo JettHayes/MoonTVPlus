@@ -614,7 +614,7 @@ function storeRoomInfo(info: StoredRoomInfo) {
 }
 
 // 获取存储的房间信息
-function getStoredRoomInfo(): StoredRoomInfo | null {
+export function getStoredRoomInfo(): StoredRoomInfo | null {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (!stored) return null;
 

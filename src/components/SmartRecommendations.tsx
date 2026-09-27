@@ -34,10 +34,16 @@ export default function SmartRecommendations({
 }: SmartRecommendationsProps) {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const enableComments = useEnableComments();
   const recommendationDataSource = useRecommendationDataSource();
+
+  // 是否允许在豆瓣数据为空/失败时回退到 TMDB（仅混合模式）
+  const allowTmdbFallback = useCallback(() => {
+    const dataSource = recommendationDataSource || 'Mixed';
+    // 纯 TMDB / 纯豆瓣模式不回退；Mixed 及未知模式回退 TMDB
+    return dataSource !== 'TMDB' && dataSource !== 'Douban';
+  }, [recommendationDataSource]);
 
   // 决定使用哪个数据源
   const getDataSource = useCallback(() => {
@@ -61,50 +67,12 @@ export default function SmartRecommendations({
     }
   }, [recommendationDataSource, enableComments, doubanId]);
 
-  const fetchDoubanRecommendations = useCallback(async () => {
-    if (!doubanId) return;
-
-    try {
-      console.log('正在获取豆瓣推荐');
-      setLoading(true);
-      setError(null);
-
-      const cacheKey = recommendationCacheKeys.doubanRecommendations(doubanId);
-      const cached = getRecommendationCache<Recommendation[]>(cacheKey);
-
-      if (cached) {
-        console.log('使用缓存的豆瓣推荐数据');
-        setRecommendations(cached);
-        setLoading(false);
-        return;
-      }
-
-      const response = await fetch(`/api/douban-recommendations?id=${doubanId}`);
-
-      if (!response.ok) {
-        throw new Error('获取豆瓣推荐失败');
-      }
-
-      const result = await response.json();
-      const recommendationsData = result.recommendations || [];
-      setRecommendations(recommendationsData);
-
-      setRecommendationCache(cacheKey, recommendationsData);
-    } catch (err) {
-      console.error('获取豆瓣推荐失败:', err);
-      setError(err instanceof Error ? err.message : '获取推荐失败');
-    } finally {
-      setLoading(false);
-    }
-  }, [doubanId]);
-
   const fetchTMDBRecommendations = useCallback(async () => {
     if (!videoTitle) return;
 
     try {
       console.log('正在获取TMDB推荐');
       setLoading(true);
-      setError(null);
 
       const mappingCacheKey = recommendationCacheKeys.tmdbTitleMapping(videoTitle);
       const cachedId = getRecommendationCache<string>(mappingCacheKey);
@@ -115,7 +83,7 @@ export default function SmartRecommendations({
         const recommendationsCacheKey = recommendationCacheKeys.tmdbRecommendations(cachedId);
         const recommendationsCache = getRecommendationCache<Recommendation[]>(recommendationsCacheKey);
 
-        if (recommendationsCache) {
+        if (recommendationsCache && recommendationsCache.length > 0) {
           console.log('使用缓存的TMDB推荐数据');
           setRecommendations(recommendationsCache);
           setLoading(false);
@@ -136,26 +104,76 @@ export default function SmartRecommendations({
 
       const result = await response.json();
       const recommendationsData = result.recommendations || [];
-      setRecommendations(recommendationsData);
 
-      // 保存title到tmdbId的映射到localStorage（1个月）
-      if (result.tmdbId) {
-        try {
-          setRecommendationCache(mappingCacheKey, String(result.tmdbId));
+      // 仅在拿到数据时替换列表；空结果保留已有列表，避免"一闪隐藏"
+      if (recommendationsData.length > 0) {
+        setRecommendations(recommendationsData);
 
-          const recommendationsCacheKey = recommendationCacheKeys.tmdbRecommendations(result.tmdbId);
-          setRecommendationCache(recommendationsCacheKey, recommendationsData);
-        } catch (e) {
-          console.error('保存缓存失败:', e);
+        // 保存title到tmdbId的映射到localStorage（1个月）
+        if (result.tmdbId) {
+          try {
+            setRecommendationCache(mappingCacheKey, String(result.tmdbId));
+
+            const recommendationsCacheKey = recommendationCacheKeys.tmdbRecommendations(result.tmdbId);
+            setRecommendationCache(recommendationsCacheKey, recommendationsData);
+          } catch (e) {
+            console.error('保存缓存失败:', e);
+          }
         }
       }
     } catch (err) {
+      // 失败时保留已有列表，不整块卸载
       console.error('获取TMDB推荐失败:', err);
-      setError(err instanceof Error ? err.message : '获取推荐失败');
     } finally {
       setLoading(false);
     }
   }, [videoTitle]);
+
+  const fetchDoubanRecommendations = useCallback(async () => {
+    if (!doubanId) return;
+
+    try {
+      console.log('正在获取豆瓣推荐');
+      setLoading(true);
+
+      const cacheKey = recommendationCacheKeys.doubanRecommendations(doubanId);
+      const cached = getRecommendationCache<Recommendation[]>(cacheKey);
+
+      if (cached && cached.length > 0) {
+        console.log('使用缓存的豆瓣推荐数据');
+        setRecommendations(cached);
+        setLoading(false);
+        return;
+      }
+
+      const response = await fetch(`/api/douban-recommendations?id=${doubanId}`);
+
+      if (!response.ok) {
+        throw new Error('获取豆瓣推荐失败');
+      }
+
+      const result = await response.json();
+      const recommendationsData = result.recommendations || [];
+
+      if (recommendationsData.length > 0) {
+        setRecommendations(recommendationsData);
+        setRecommendationCache(cacheKey, recommendationsData);
+      } else if (allowTmdbFallback()) {
+        // 豆瓣无推荐结果，混合模式下回退 TMDB
+        console.log('豆瓣推荐为空，回退 TMDB');
+        await fetchTMDBRecommendations();
+      }
+    } catch (err) {
+      console.error('获取豆瓣推荐失败:', err);
+      // 混合模式：豆瓣失败回退 TMDB；回退也失败时（内部已兜底）保留已有列表
+      if (allowTmdbFallback()) {
+        console.log('豆瓣推荐失败，回退 TMDB');
+        await fetchTMDBRecommendations();
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [doubanId, allowTmdbFallback, fetchTMDBRecommendations]);
 
   useEffect(() => {
     const dataSource = getDataSource();
@@ -179,7 +197,9 @@ export default function SmartRecommendations({
     return null;
   }
 
-  if (loading) {
+  // 仅在首次加载（尚无任何数据）时展示加载动画；
+  // 刷新/回退时保留已有内容，避免"一闪隐藏"
+  if (loading && recommendations.length === 0) {
     return (
       <div className='flex justify-center items-center py-8'>
         <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-green-500'></div>
@@ -187,7 +207,8 @@ export default function SmartRecommendations({
     );
   }
 
-  if (error || recommendations.length === 0) {
+  // 没有任何推荐数据时不渲染
+  if (recommendations.length === 0) {
     return null;
   }
 

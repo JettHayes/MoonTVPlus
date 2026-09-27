@@ -1,16 +1,72 @@
 'use client';
 
+import { ArrowLeft, ImageOff, Play, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { playMusicList, playMusicSong } from '@/lib/music/actions';
-import MusicLoadingIndicator from '@/components/music/MusicLoadingIndicator';
+
+import MusicEmpty, { MusicRowListSkeleton } from '@/components/music/MusicEmpty';
+import MusicPage from '@/components/music/MusicPage';
+import SongList from '@/components/music/SongList';
+import {
+  MUSIC_ART_BROKEN,
+  MUSIC_BACK_BUTTON,
+  MUSIC_BAR_TITLE,
+  MUSIC_BUTTON,
+  MUSIC_COUNT,
+  MUSIC_DANGER_BUTTON,
+  MUSIC_DRAWER_ITEM,
+  MUSIC_DRAWER_ITEM_ACTIVE,
+  MUSIC_DRAWER_ITEM_IDLE,
+  MUSIC_DRAWER_LABEL,
+  MUSIC_DRAWER_MARK,
+  MUSIC_ICON_BUTTON_DANGER,
+  MUSIC_LABEL,
+  MUSIC_MUTED,
+  MUSIC_PICK_DESC,
+  MUSIC_PICK_FRAME,
+} from '@/components/music/tokens';
+import { cn } from '@/lib/cn';
+import { playMusicList } from '@/lib/music/actions';
 import { getApiErrorMessage } from '@/lib/music/errors';
-import { mapSong, SourcePill } from '@/lib/music/shared';
+import { mapSong } from '@/lib/music/shared';
+
+/**
+ * 左栏歌单名前面那张小缩略图。
+ *
+ * 单独拎出来只为一件事：图挂了要有兜底。原来直接把 <img> 丢进框里，既没有
+ * onError，也没有空态——图 404 时框里就是浏览器自带的破图图标压在卡纸上。
+ * 兜底和歌单卡的破图是同一种（MUSIC_ART_BROKEN），不是热榜套面那种版面。
+ */
+function PickThumb({ src }: { src?: string }) {
+  const [failed, setFailed] = useState(false);
+  const url = src && !failed ? src : '';
+
+  return (
+    <span className={MUSIC_PICK_FRAME}>
+      {url ? (
+        <img
+          src={url}
+          alt=''
+          loading='lazy'
+          referrerPolicy='no-referrer'
+          onError={() => setFailed(true)}
+          className='h-full w-full object-cover'
+        />
+      ) : (
+        <span className={MUSIC_ART_BROKEN}>
+          <ImageOff className='h-3.5 w-3.5' strokeWidth={1.6} />
+        </span>
+      )}
+    </span>
+  );
+}
 
 export default function MusicMyPlaylistsPage() {
   const [userPlaylists, setUserPlaylists] = useState<any[]>([]);
   const [selectedUserPlaylist, setSelectedUserPlaylist] = useState<any | null>(null);
   const [userPlaylistSongs, setUserPlaylistSongs] = useState<any[]>([]);
-  const [loadingUserPlaylists, setLoadingUserPlaylists] = useState(false);
+  // 歌单列表挂载即拉，初值给 true 才不会先闪一帧"还没有歌单"。
+  // 下面的曲目列表是人点出来的，初值就留 false。
+  const [loadingUserPlaylists, setLoadingUserPlaylists] = useState(true);
   const [loadingUserPlaylistSongs, setLoadingUserPlaylistSongs] = useState(false);
   const [deletingPlaylistId, setDeletingPlaylistId] = useState<string | null>(null);
   const [removingSongId, setRemovingSongId] = useState<string | null>(null);
@@ -45,9 +101,22 @@ export default function MusicMyPlaylistsPage() {
       .finally(() => setLoadingUserPlaylistSongs(false));
   }, []);
 
+  // 手机上"进入 / 返回"都是换屏，要把页面带回顶部，否则会落在上一屏滚到的位置。
+  // 桌面是两栏并排、没有换屏，别把页面拽走——所以只在小屏做。
+  const scrollToTopOnPhone = () => {
+    if (window.matchMedia('(max-width: 767px)').matches) window.scrollTo({ top: 0 });
+  };
+
   const selectPlaylist = (playlist: any) => {
     setSelectedUserPlaylist(playlist);
     loadUserPlaylistSongs(playlist.id);
+    scrollToTopOnPhone();
+  };
+
+  const backToList = () => {
+    setSelectedUserPlaylist(null);
+    setUserPlaylistSongs([]);
+    scrollToTopOnPhone();
   };
 
   const deleteUserPlaylist = async (playlistId: string) => {
@@ -100,79 +169,149 @@ export default function MusicMyPlaylistsPage() {
     }
   };
 
+  // 这一页不看播放器状态：点行就是播它，所以行内不接 useNowPlaying，
+  // 免得把"上次听的那首"错标成"这个歌单里的第一首"。
   const mappedSongs = userPlaylistSongs.map(normalizePlaylistSong);
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div className="md:col-span-1">
-        <div className="bg-zinc-800/50 rounded-xl p-4 border border-white/10">
-          <h2 className="text-lg font-bold mb-4">歌单列表</h2>
-          {loadingUserPlaylists ? <MusicLoadingIndicator className="py-8" /> : userPlaylists.length === 0 ? (
-            <div className="text-center py-8 text-zinc-400">还没有歌单</div>
+    <MusicPage
+      title='我的歌单'
+      subtitle={userPlaylists.length > 0 ? `${userPlaylists.length} 个歌单` : '还没有收藏任何歌单'}
+    >
+      {/* 手机上不上下堆叠，两栏二选一：没选中就只有歌单列表，点进一个就整屏让给曲目，
+          靠上面那颗返回键退回列表。md 起恢复两栏并排，两栏同时在，返回键收起。 */}
+      <div className='grid grid-cols-1 gap-6 md:grid-cols-3'>
+        <div className={cn('md:col-span-1', selectedUserPlaylist && 'hidden md:block')}>
+          <span className={cn(MUSIC_LABEL, 'mb-2 block')}>歌单</span>
+          {loadingUserPlaylists ? (
+            <MusicRowListSkeleton count={4} />
+          ) : userPlaylists.length === 0 ? (
+            <MusicEmpty
+              title='还没有歌单'
+              hint='在歌曲行上点那颗心，就能把歌收进一个歌单。'
+            />
           ) : (
-            <div className="space-y-2">
-              {userPlaylists.map((playlist) => (
-                <div key={playlist.id} className={`p-3 rounded-lg cursor-pointer transition-colors ${selectedUserPlaylist?.id === playlist.id ? 'bg-green-600/20 border border-green-500' : 'bg-white/5 hover:bg-white/10'}`} onClick={() => selectPlaylist(playlist)}>
-                  <div className="flex items-center gap-3">
-                    {playlist.cover ? <img src={playlist.cover} alt={playlist.name} className="w-12 h-12 rounded object-cover" /> : <div className="w-12 h-12 rounded bg-zinc-700" />}
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate">{playlist.name}</div>
-                      {playlist.description && <div className="text-xs text-zinc-500 truncate">{playlist.description}</div>}
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className='flex flex-col gap-1'>
+              {userPlaylists.map((playlist) => {
+                const active = selectedUserPlaylist?.id === playlist.id;
+                return (
+                  <button
+                    key={playlist.id}
+                    type='button'
+                    aria-pressed={active}
+                    onClick={() => selectPlaylist(playlist)}
+                    className={cn(
+                      MUSIC_DRAWER_ITEM,
+                      active ? MUSIC_DRAWER_ITEM_ACTIVE : MUSIC_DRAWER_ITEM_IDLE
+                    )}
+                  >
+                    <PickThumb src={playlist.cover} />
+                    <span className='min-w-0 flex-1'>
+                      <span className={cn(MUSIC_DRAWER_LABEL, 'block truncate')}>
+                        {playlist.name}
+                      </span>
+                      {playlist.description ? (
+                        <span className={cn(MUSIC_PICK_DESC, 'block')}>
+                          {playlist.description}
+                        </span>
+                      ) : typeof playlist.song_count === 'number' ? (
+                        <span className={cn(MUSIC_PICK_DESC, 'block')}>
+                          {playlist.song_count} 首
+                        </span>
+                      ) : null}
+                    </span>
+                    {active ? <span aria-hidden className={MUSIC_DRAWER_MARK} /> : null}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
-      </div>
-      <div className="md:col-span-2">
-        {selectedUserPlaylist ? (
-          <div className="bg-zinc-800/50 rounded-xl p-4 border border-white/10">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-lg font-bold">{selectedUserPlaylist.name}</h2>
-                {selectedUserPlaylist.description && <p className="text-sm text-zinc-400 mt-1">{selectedUserPlaylist.description}</p>}
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => playMusicList(mappedSongs, selectedUserPlaylist.name)} disabled={mappedSongs.length === 0} className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-zinc-700 disabled:cursor-not-allowed rounded-lg transition-colors">播放全部</button>
-                <button
-                  onClick={() => deleteUserPlaylist(selectedUserPlaylist.id)}
-                  disabled={deletingPlaylistId !== null}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-zinc-700 disabled:cursor-not-allowed rounded-lg transition-colors"
-                >
-                  {deletingPlaylistId === selectedUserPlaylist.id ? '删除中...' : '删除歌单'}
-                </button>
-              </div>
-            </div>
-            {loadingUserPlaylistSongs ? <MusicLoadingIndicator className="py-8" /> : mappedSongs.length === 0 ? <div className="text-center py-8 text-zinc-400">歌单为空</div> : (
-              <div className="space-y-2">
-                {mappedSongs.map((song, index) => (
-                  <div key={`${song.platform}+${song.id}`} className="flex items-center gap-2 p-2.5 md:gap-3 md:p-3 rounded-lg bg-white/5 hover:bg-white/10 transition-colors">
-                    <div className="text-zinc-500 dark:text-zinc-300 text-xs md:text-sm w-6 md:w-8 text-center shrink-0">{index + 1}</div>
-                    {song.pic && <img src={song.pic} alt={song.name} className="w-10 h-10 md:w-12 md:h-12 rounded object-cover shrink-0" />}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 min-w-0"><div className="font-medium truncate">{song.name}</div><SourcePill source={song.platform} /></div>
-                      <div className="text-sm text-zinc-400 truncate">{song.artist}</div>
-                    </div>
-                    <button onClick={() => playMusicSong(song, index)} className="text-zinc-500 hover:text-green-500 transition-colors p-1 md:p-2 shrink-0" title="播放">▶</button>
-                    <button
-                      onClick={() => removeSongFromUserPlaylist(song)}
-                      disabled={removingSongId === song.id}
-                      className="text-zinc-500 hover:text-red-500 disabled:text-zinc-700 transition-colors p-1 md:p-2 shrink-0"
-                      title="移除"
-                    >
-                      {removingSongId === song.id ? '…' : '✕'}
-                    </button>
+
+        <div className={cn('md:col-span-2', !selectedUserPlaylist && 'hidden md:block')}>
+          {selectedUserPlaylist ? (
+            <>
+              <button
+                type='button'
+                onClick={backToList}
+                className={cn(MUSIC_BACK_BUTTON, 'mb-3 md:hidden')}
+              >
+                <ArrowLeft className='h-3.5 w-3.5' strokeWidth={2} />
+                全部歌单
+              </button>
+              {/* 这里不画下边框：曲目列表自己的上沿有一道实线，两条线一叠会像画歪了。 */}
+              <div className='flex flex-wrap items-start justify-between gap-3 pb-1'>
+                <div className='min-w-0'>
+                  <div className={cn(MUSIC_BAR_TITLE, 'text-[calc(20*var(--music-px))]')}>
+                    {selectedUserPlaylist.name}
                   </div>
-                ))}
+                  {selectedUserPlaylist.description ? (
+                    <p className={cn(MUSIC_MUTED, 'mt-1 font-music-body text-[calc(12*var(--music-px))]')}>
+                      {selectedUserPlaylist.description}
+                    </p>
+                  ) : null}
+                </div>
+                <div className='flex shrink-0 flex-wrap items-center gap-2'>
+                  <span className={MUSIC_COUNT}>{mappedSongs.length} 首</span>
+                  <button
+                    type='button'
+                    onClick={() => playMusicList(mappedSongs, selectedUserPlaylist.name)}
+                    disabled={mappedSongs.length === 0}
+                    className={MUSIC_BUTTON}
+                  >
+                    <Play className='h-3.5 w-3.5' strokeWidth={2.2} />
+                    播放全部
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => deleteUserPlaylist(selectedUserPlaylist.id)}
+                    disabled={deletingPlaylistId !== null}
+                    className={MUSIC_DANGER_BUTTON}
+                  >
+                    <Trash2 className='h-3.5 w-3.5' strokeWidth={2} />
+                    {deletingPlaylistId === selectedUserPlaylist.id ? '删除中…' : '删除歌单'}
+                  </button>
+                </div>
               </div>
-            )}
-          </div>
-        ) : (
-          <div className="bg-zinc-800/50 rounded-xl p-4 border border-white/10 h-full flex items-center justify-center"><div className="text-center text-zinc-400">选择一个歌单查看详情</div></div>
-        )}
+
+              {loadingUserPlaylistSongs ? (
+                <MusicRowListSkeleton count={6} />
+              ) : mappedSongs.length === 0 ? (
+                <MusicEmpty
+                  className='mt-4'
+                  title='这个歌单还是空的'
+                  hint='在歌曲行上点那颗心，把歌加进来。'
+                />
+              ) : (
+                <SongList
+                  songs={mappedSongs}
+                  extraActions={(song) => (
+                    <button
+                      type='button'
+                      title='从歌单移除'
+                      aria-label='从歌单移除'
+                      disabled={removingSongId === song.id}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        removeSongFromUserPlaylist(song);
+                      }}
+                      className={MUSIC_ICON_BUTTON_DANGER}
+                    >
+                      <Trash2 className='h-3.5 w-3.5' strokeWidth={1.9} />
+                    </button>
+                  )}
+                />
+              )}
+            </>
+          ) : (
+            <MusicEmpty
+              className='min-h-[280px]'
+              title='还没有选中歌单'
+              hint='从左边挑一个，曲目会显示在这里。'
+            />
+          )}
+        </div>
       </div>
-    </div>
+    </MusicPage>
   );
 }

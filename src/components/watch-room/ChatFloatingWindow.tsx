@@ -1,7 +1,7 @@
 // 全局聊天悬浮窗和房间信息按钮
 'use client';
 
-import { AlertCircle,Info, LogOut, Maximize2, MessageCircle, Mic, MicOff, Minimize2, Send, Smile, Users, Volume2, VolumeX, X, XCircle } from 'lucide-react';
+import { AlertCircle,Check, Copy,Info, Link, LogOut, Maximize2, MessageCircle, Mic, MicOff, Minimize2, Send, Smile, Users, Volume2, VolumeX, X, XCircle } from 'lucide-react';
 import { useEffect, useRef,useState } from 'react';
 
 import { useVoiceChat } from '@/hooks/useVoiceChat';
@@ -17,6 +17,7 @@ export default function ChatFloatingWindow() {
   const [message, setMessage] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showRoomInfo, setShowRoomInfo] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastMessageCountRef = useRef(0);
@@ -139,6 +140,11 @@ export default function ChatFloatingWindow() {
   }
 
   const { chatMessages, sendChatMessage, members, isOwner, currentRoom, leaveRoom } = watchRoom;
+
+  // 邀请链接：打开即自动加入当前房间
+  const inviteUrl = typeof window !== 'undefined' && currentRoom
+    ? `${window.location.origin}/watch-room?room=${currentRoom.id}`
+    : '';
 
   const handleSendMessage = () => {
     if (!message.trim()) return;
@@ -294,6 +300,50 @@ export default function ChatFloatingWindow() {
                   <span className='text-sm font-medium text-gray-600 dark:text-gray-400'>房主</span>
                   <span className='text-sm font-semibold text-gray-900 dark:text-gray-100'>{currentRoom.ownerName}</span>
                 </div>
+              </div>
+
+              {/* 一键加入链接 */}
+              <div className='rounded-lg bg-gray-50 dark:bg-gray-800 p-4 border border-gray-200 dark:border-gray-700'>
+                <div className='flex items-center gap-2 mb-2'>
+                  <Link className='h-4 w-4 text-gray-600 dark:text-gray-400' />
+                  <span className='text-sm font-medium text-gray-600 dark:text-gray-400'>一键加入链接</span>
+                </div>
+                <div className='flex items-center gap-2'>
+                  <input
+                    readOnly
+                    value={inviteUrl}
+                    onFocus={(e) => e.target.select()}
+                    className='flex-1 min-w-0 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1.5 text-xs text-gray-600 dark:text-gray-300 truncate focus:outline-none'
+                    aria-label='邀请链接'
+                  />
+                  <button
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(inviteUrl);
+                        setInviteCopied(true);
+                        setTimeout(() => setInviteCopied(false), 2000);
+                      } catch {
+                        // 剪贴板不可用时回退到手动选择输入框
+                      }
+                    }}
+                    className='flex-shrink-0 flex items-center gap-1 rounded-md bg-blue-500 hover:bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors'
+                  >
+                    {inviteCopied ? (
+                      <>
+                        <Check className='h-3.5 w-3.5' />
+                        已复制
+                      </>
+                    ) : (
+                      <>
+                        <Copy className='h-3.5 w-3.5' />
+                        复制
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className='mt-2 text-xs text-gray-400 dark:text-gray-500'>
+                  好友打开链接后即可自动加入房间（密码房仍需输入密码）
+                </p>
               </div>
 
               {/* 成员列表 */}

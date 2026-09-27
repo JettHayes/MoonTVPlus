@@ -23,8 +23,10 @@ export async function GET(request: NextRequest) {
 
   // 返回外部服务器认证信息
   const externalServerAuth = process.env.WATCH_ROOM_EXTERNAL_SERVER_AUTH;
+  const externalAppId = process.env.WATCH_ROOM_EXTERNAL_APP_ID;
 
   return NextResponse.json({
     externalServerAuth: externalServerAuth || null,
+    externalAppId: externalAppId || null,
   });
 }

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { validateKeywordExpr } from '@/lib/anime-keyword-expr';
+import { validateEpisodeRegex } from '@/lib/anime-subscription';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 
@@ -94,6 +95,24 @@ export async function PUT(
       subscription.refillMissingEpisodes = Boolean(
         updates.refillMissingEpisodes
       );
+    }
+    if (updates.episodeRegex !== undefined) {
+      const regexText =
+        typeof updates.episodeRegex === 'string'
+          ? updates.episodeRegex.trim()
+          : '';
+      if (regexText) {
+        const regexCheck = validateEpisodeRegex(regexText);
+        if (!regexCheck.ok) {
+          return NextResponse.json(
+            { error: `集数正则无效: ${regexCheck.error}` },
+            { status: 400 }
+          );
+        }
+        subscription.episodeRegex = regexText;
+      } else {
+        subscription.episodeRegex = undefined;
+      }
     }
     if (updates.lastEpisode !== undefined) {
       // 验证集数为非负整数

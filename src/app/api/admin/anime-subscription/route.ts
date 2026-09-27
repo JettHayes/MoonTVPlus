@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { validateKeywordExpr } from '@/lib/anime-keyword-expr';
+import { validateEpisodeRegex } from '@/lib/anime-subscription';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { AnimeSubscription } from '@/types/anime-subscription';
@@ -62,6 +63,7 @@ export async function POST(req: NextRequest) {
       lastEpisode,
       onePerEpisode,
       refillMissingEpisodes,
+      episodeRegex,
     } = await req.json();
 
     // 验证必填字段
@@ -86,6 +88,17 @@ export async function POST(req: NextRequest) {
       if (!excludeCheck.ok) {
         return NextResponse.json(
           { error: `排除关键词表达式无效: ${excludeCheck.error}` },
+          { status: 400 }
+        );
+      }
+    }
+    const episodeRegexText =
+      typeof episodeRegex === 'string' ? episodeRegex.trim() : '';
+    if (episodeRegexText) {
+      const regexCheck = validateEpisodeRegex(episodeRegexText);
+      if (!regexCheck.ok) {
+        return NextResponse.json(
+          { error: `集数正则无效: ${regexCheck.error}` },
           { status: 400 }
         );
       }
@@ -142,6 +155,7 @@ export async function POST(req: NextRequest) {
       enabled: enabled ?? true,
       onePerEpisode: Boolean(onePerEpisode),
       refillMissingEpisodes: Boolean(refillMissingEpisodes),
+      episodeRegex: episodeRegexText || undefined,
       lastCheckTime: 0,
       lastEpisode: episodeNum,
       createdAt: Date.now(),

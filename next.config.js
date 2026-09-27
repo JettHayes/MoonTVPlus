@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-var-requires */
 
 const { PHASE_DEVELOPMENT_SERVER } = require('next/constants');
+const fs = require('fs');
 const path = require('path');
 
 // 检测是否为边缘平台构建
@@ -77,6 +78,49 @@ const createNextConfig = (phase) => {
   },
 
   webpack(config, { isServer }) {
+    if (!isServer) {
+      // libbitsub（PGS 位图字幕渲染器）不经 webpack 打包：其 wasm 胶水（pkg/libbitsub.js）
+      // 是纯 ESM，被 new URL() 引用时 webpack 会原样输出为静态资源，Next 的 swc 压缩器
+      // 按 script 模式解析会报 "export cannot be used outside of module code"。
+      // 改为把包原样拷到 public/libbitsub/，运行时用 import(/* webpackIgnore: true */ ...)
+      // 让浏览器原生加载其 ESM 模块图（play/page.tsx 的 ensureBitsubRenderer）。
+      const libbitsubSource = path.join(__dirname, 'node_modules', 'libbitsub');
+      const libbitsubTarget = path.join(__dirname, 'public', 'libbitsub');
+      for (const dir of ['dist', 'pkg']) {
+        fs.cpSync(path.join(libbitsubSource, dir), path.join(libbitsubTarget, dir), {
+          recursive: true,
+          filter: (source) => !/\.(d\.ts|map)$/.test(source),
+        });
+      }
+      // dist/ 是面向 bundler 的输出，相对导入不带 .js 扩展名（如 from './wrapper'、
+      // import('../../pkg/libbitsub')）；浏览器原生 ESM 不做扩展名补全会 404，
+      // 拷贝后统一改写成带 .js 的形式。
+      const rewriteLibbitsubImports = (dir) => {
+        for (const name of fs.readdirSync(dir)) {
+          const file = path.join(dir, name);
+          const stat = fs.statSync(file);
+          if (stat.isDirectory()) {
+            rewriteLibbitsubImports(file);
+          } else if (name.endsWith('.js')) {
+            const source = fs.readFileSync(file, 'utf8');
+            const rewritten = source
+              .replace(
+                /(from\s*)(['"])(\.\.?\/[^'"]+)\2/g,
+                (m, pre, quote, spec) =>
+                  /\.[a-z]+$/i.test(spec) ? m : `${pre}${quote}${spec}.js${quote}`
+              )
+              .replace(
+                /(import\(\s*)(['"])(\.\.?\/[^'"]+)\2/g,
+                (m, pre, quote, spec) =>
+                  /\.[a-z]+$/i.test(spec) ? m : `${pre}${quote}${spec}.js${quote}`
+              );
+            if (rewritten !== source) fs.writeFileSync(file, rewritten);
+          }
+        }
+      };
+      rewriteLibbitsubImports(path.join(libbitsubTarget, 'dist'));
+    }
+
     // Grab the existing rule that handles SVG imports
     const fileLoaderRule = config.module.rules.find((rule) =>
       rule.test?.test?.('.svg')

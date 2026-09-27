@@ -9,6 +9,7 @@ export const runtime = 'nodejs';
 interface CmsClassResponse {
   class?: Array<{
     type_id: string | number;
+    type_pid?: string | number;
     type_name: string;
   }>;
 }
@@ -77,6 +78,8 @@ export async function GET(request: NextRequest) {
       categories: filteredCategories.map((item) => ({
         id: item.type_id.toString(),
         name: item.type_name,
+        // 一级分类 type_pid 为 0，二级分类指向父分类 id
+        pid: (item.type_pid ?? 0).toString(),
       })),
     });
   } catch (error) {

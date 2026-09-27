@@ -4,6 +4,7 @@ import { MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { getEpisodes, searchAnime } from '@/lib/danmaku/api';
+import { stripDanmakuSource } from '@/lib/danmaku/format';
 import type {
   DanmakuAnime,
   DanmakuComment,
@@ -17,6 +18,8 @@ interface DanmakuPanelProps {
   onDanmakuSelect: (selection: DanmakuSelection) => void;
   currentSelection: DanmakuSelection | null;
   onUploadDanmaku?: (comments: DanmakuComment[]) => void;
+  // 手动选集时回传该弹幕源的完整分集列表，供选集面板刷新分集标题
+  onEpisodesLoaded?: (episodes: DanmakuEpisode[]) => void;
 }
 
 export default function DanmakuPanel({
@@ -25,6 +28,7 @@ export default function DanmakuPanel({
   onDanmakuSelect,
   currentSelection,
   onUploadDanmaku,
+  onEpisodesLoaded,
 }: DanmakuPanelProps) {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [searchResults, setSearchResults] = useState<DanmakuAnime[]>([]);
@@ -110,9 +114,13 @@ export default function DanmakuPanel({
         searchKeyword: searchKeyword.trim() || undefined, // 使用当前搜索框的关键词
       };
 
+      // 回传完整分集列表，让选集面板据此刷新分集标题（弹幕优先）
+      if (episodes.length > 0) {
+        onEpisodesLoaded?.(episodes);
+      }
       onDanmakuSelect(selection);
     },
-    [selectedAnime, searchKeyword, onDanmakuSelect]
+    [selectedAnime, searchKeyword, episodes, onEpisodesLoaded, onDanmakuSelect]
   );
 
   // 回到搜索结果
@@ -363,7 +371,7 @@ export default function DanmakuPanel({
               {currentSelection.animeTitle}
             </p>
             <p className='text-xs text-gray-600 dark:text-gray-400'>
-              {currentSelection.episodeTitle}
+              {stripDanmakuSource(currentSelection.episodeTitle)}
             </p>
             {currentSelection.danmakuCount !== undefined && (
               <p className='mt-1 text-xs text-gray-500 dark:text-gray-500'>
@@ -492,7 +500,7 @@ export default function DanmakuPanel({
                               ? 'bg-green-500 text-white shadow-md'
                               : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
                           }`}
-                          title={episode.episodeTitle}
+                          title={stripDanmakuSource(episode.episodeTitle)}
                         >
                           <div className='truncate'>
                             {getEpisodeDisplayLabel(episode.episodeTitle, episode.episodeNumber)}
@@ -527,7 +535,7 @@ export default function DanmakuPanel({
 
                           <div className='flex-1 min-w-0'>
                             <div className='font-semibold text-sm mb-1 truncate'>
-                              {episode.episodeTitle}
+                              {stripDanmakuSource(episode.episodeTitle)}
                             </div>
                             <div
                               className={`flex items-center gap-2 text-xs ${

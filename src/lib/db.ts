@@ -188,9 +188,6 @@ function getD1Adapter(): any {
   db.pragma('foreign_keys = ON'); // 与 D1 保持一致，启用外键约束
   db.pragma('busy_timeout = 5000'); // 避免启动阶段或并发写入时立即锁失败
 
-  console.log('Using SQLite database (non-Cloudflare mode)');
-  console.log('Database location:', dbPath);
-
   return new SQLiteAdapter(db);
 }
 

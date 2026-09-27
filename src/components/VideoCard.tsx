@@ -192,6 +192,9 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
     const [showAIChat, setShowAIChat] = useState(false);
     const [isAIStreaming, setIsAIStreaming] = useState(false);
     const [aiEnabled, setAiEnabled] = useState(false);
+    const [rateBadgeStyle, setRateBadgeStyle] = useState<
+      'default' | 'flag' | 'medal'
+    >('flag');
     const [aiDefaultMessageWithVideo, setAiDefaultMessageWithVideo] =
       useState('');
     const [showDetailPanel, setShowDetailPanel] = useState(false);
@@ -216,6 +219,16 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
           ?.AI_DEFAULT_MESSAGE_WITH_VIDEO;
         if (defaultMsg) {
           setAiDefaultMessageWithVideo(defaultMsg);
+        }
+
+        // 评分星标样式
+        const badgeStyle = (window as any).RUNTIME_CONFIG?.RATE_BADGE_STYLE;
+        if (
+          badgeStyle === 'default' ||
+          badgeStyle === 'flag' ||
+          badgeStyle === 'medal'
+        ) {
+          setRateBadgeStyle(badgeStyle);
         }
       }
     }, []);
@@ -683,6 +696,15 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
       if (daysUntilRelease === 0) return '今日上映';
       return '已上映';
     }, [isUpcoming, daysUntilRelease]);
+
+    // 评分档位：高分暖金 / 中分主题色 / 低分冷灰（豆瓣 10 分制）
+    const rateTier = useMemo(() => {
+      const n = parseFloat(rate || '');
+      if (!Number.isFinite(n)) return 'mid';
+      if (n >= 8) return 'hi';
+      if (n >= 6.5) return 'mid';
+      return 'lo';
+    }, [rate]);
 
 
     const openTrailerPicker = useCallback(async () => {
@@ -1272,25 +1294,84 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
               </div>
             )}
 
-            {/* 徽章 */}
-            {config.showRating && rate && (
-              <div
-                className='absolute top-2 right-2 bg-pink-500 text-white text-xs font-bold w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-all duration-300 ease-out group-hover:scale-110'
-                style={
-                  {
-                    WebkitUserSelect: 'none',
-                    userSelect: 'none',
-                    WebkitTouchCallout: 'none',
-                  } as React.CSSProperties
-                }
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  return false;
-                }}
-              >
-                {rate}
-              </div>
-            )}
+            {/* 评分徽章 */}
+            {config.showRating &&
+              rate &&
+              (rateBadgeStyle === 'flag' ? (
+                <div
+                  className={`mtv-rate mtv-rate-flag ${rateTier}`}
+                  style={
+                    {
+                      WebkitTouchCallout: 'none',
+                    } as React.CSSProperties
+                  }
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    return false;
+                  }}
+                >
+                  <span className='mtv-rate-stars'>
+                    {[0, 1, 2].map((i) => (
+                      <svg key={i} viewBox='0 0 24 24'>
+                        <path d='M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z' />
+                      </svg>
+                    ))}
+                  </span>
+                  {rate}
+                </div>
+              ) : rateBadgeStyle === 'medal' ? (
+                <div
+                  className={`mtv-rate mtv-rate-medal ${rateTier}`}
+                  style={
+                    {
+                      WebkitTouchCallout: 'none',
+                    } as React.CSSProperties
+                  }
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    return false;
+                  }}
+                >
+                  <span className='mtv-rate-ribbons'>
+                    <i className='l' />
+                    <i className='r' />
+                  </span>
+                  <span className='mtv-rate-disc'>
+                    <span className='mtv-rate-stars'>
+                      <span className='srow'>
+                        <svg viewBox='0 0 24 24'>
+                          <path d='M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z' />
+                        </svg>
+                      </span>
+                      <span className='srow'>
+                        {[0, 1].map((i) => (
+                          <svg key={i} viewBox='0 0 24 24'>
+                            <path d='M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7z' />
+                          </svg>
+                        ))}
+                      </span>
+                    </span>
+                    {rate}
+                  </span>
+                </div>
+              ) : (
+                <div
+                  className='absolute top-2 right-2 bg-pink-500 text-white text-xs font-bold w-7 h-7 rounded-full flex items-center justify-center shadow-md transition-all duration-300 ease-out group-hover:scale-110'
+                  style={
+                    {
+                      WebkitUserSelect: 'none',
+                      userSelect: 'none',
+                      WebkitTouchCallout: 'none',
+                    } as React.CSSProperties
+                  }
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    return false;
+                  }}
+                >
+                  {rate}
+                </div>
+              ))}
 
             {/* 竖向模式：顶部直链地址显示 */}
             {orientation === 'vertical' &&
@@ -2124,6 +2205,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(
             isBangumi={isBangumi}
             tmdbId={tmdb_id}
             type={actualSearchType as 'movie' | 'tv'}
+            year={actualYear}
             seasonNumber={seasonNumber}
             currentEpisode={currentEpisode}
             cmsData={cmsData}

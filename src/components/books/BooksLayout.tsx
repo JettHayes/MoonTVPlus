@@ -2,7 +2,6 @@
 
 import {
   BookOpen,
-  ChevronLeft,
   Headphones,
   History,
   Library,
@@ -10,21 +9,33 @@ import {
   MoreVertical,
   Search,
   Settings2,
-  Sparkles,
 } from 'lucide-react';
-import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { useSite } from '@/components/SiteProvider';
-import { ThemeToggle } from '@/components/ThemeToggle';
+import { cn } from '@/lib/cn';
 
-const tabs = [
+import {
+  LIBRARY_FOCUS,
+  LIBRARY_ICON_BUTTON_GHOST,
+  LIBRARY_MENU_ITEM,
+  LIBRARY_PANEL,
+} from '@/components/media/library';
+import MediaShell, { MediaShellTab } from '@/components/media/MediaShell';
+import { useSite } from '@/components/SiteProvider';
+
+const tabs: MediaShellTab[] = [
   { href: '/books', label: '发现', icon: Library },
   { href: '/books/search', label: '搜索', icon: Search },
   { href: '/books/shelf', label: '书架', icon: BookOpen },
   { href: '/books/history', label: '历史', icon: History },
 ];
+
+// 阅读页内容区样式：保持改造前的原值，仅把移动端顶栏高度对齐到外壳统一的 h-14
+// （阅读页自身按 calc(100vh-3.5rem) 计算高度，原先桌面端 h-16 会多出 0.5rem）。
+// max-w-6xl 经 cn() 覆盖外壳默认的 max-w-7xl，避免 /books/read 布局回归。
+const READER_MAIN_CLASS =
+  'max-w-6xl pt-[calc(3.5rem+env(safe-area-inset-top))] sm:pt-[calc(4rem+env(safe-area-inset-top))]';
 
 type ReadHeaderPayload = {
   title?: string;
@@ -117,172 +128,81 @@ export default function BooksLayout({
     return base;
   }, [pathname, searchParams, isRead, readHeader]);
 
-  return (
-    <div className='min-h-screen bg-[radial-gradient(circle_at_top_left,#fce7f3_0,transparent_34rem),linear-gradient(180deg,#fff7fb_0%,#f8fafc_44%,#f8fafc_100%)] text-slate-900 dark:bg-[radial-gradient(circle_at_top_left,rgba(6,95,70,0.26)_0,transparent_32rem),linear-gradient(180deg,#050505_0%,#09090b_100%)] dark:text-gray-100'>
-      <header
-        className='fixed inset-x-0 top-0 z-40 border-b border-emerald-100/80 bg-white/85 shadow-sm shadow-emerald-950/5 backdrop-blur-xl dark:border-emerald-500/10 dark:bg-gray-950/85 dark:shadow-black/20'
-        style={{ paddingTop: 'env(safe-area-inset-top)' }}
+  const iconButtonClass = cn(LIBRARY_ICON_BUTTON_GHOST, LIBRARY_FOCUS);
+
+  const readerActions = (
+    <>
+      <button
+        type='button'
+        onClick={() =>
+          window.dispatchEvent(new CustomEvent('books-read-toggle-chapters'))
+        }
+        className={iconButtonClass}
+        aria-label='目录'
       >
-        <div className='mx-auto flex h-16 max-w-6xl items-center gap-3 px-4'>
-          {isRead || pathname === '/books/detail' ? (
-            <Link
-              href={meta.backHref || '/books'}
-              className='inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full text-slate-700 transition-colors duration-200 hover:bg-emerald-50 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:text-slate-200 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200'
-            >
-              <ChevronLeft className='h-5 w-5' />
-            </Link>
-          ) : (
-            <Link
-              href='/'
-              className='inline-flex cursor-pointer items-center gap-2 rounded-full bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700 transition-colors duration-200 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20'
-            >
-              <Sparkles className='h-4 w-4' />
-              {siteName}
-            </Link>
-          )}
-          <div className='min-w-0 flex-1'>
-            <div className='group relative'>
-              <div className='truncate text-sm font-bold tracking-tight text-slate-950 dark:text-white sm:text-base'>
-                {meta.title}
-              </div>
-              <div className='absolute left-1/2 top-full z-[100] mt-2 w-max max-w-[85vw] -translate-x-1/2 rounded-lg bg-gray-800 px-3 py-2 text-center text-sm text-white opacity-0 invisible shadow-xl transition-all duration-200 ease-out pointer-events-none group-hover:visible group-hover:opacity-100 dark:bg-gray-900'>
-                <div className='max-w-[85vw] break-words whitespace-normal sm:max-w-none sm:whitespace-nowrap'>
-                  {meta.title}
-                </div>
-                {meta.subtitle ? (
-                  <div className='mt-1 max-w-[85vw] break-words whitespace-normal text-xs text-gray-300 sm:max-w-none sm:whitespace-nowrap'>
-                    {meta.subtitle}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-            <div className='truncate text-xs text-slate-500 dark:text-slate-400'>
-              {meta.subtitle}
-            </div>
-          </div>
-          <div className='hidden md:block'>
-            <ThemeToggle />
-          </div>
-          {isRead ? (
-            <div className='flex items-center gap-2'>
-              <button
-                type='button'
-                onClick={() =>
-                  window.dispatchEvent(
-                    new CustomEvent('books-read-toggle-chapters')
-                  )
-                }
-                className='inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full transition-colors duration-200 hover:bg-emerald-50 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200'
-                aria-label='目录'
-              >
-                <List className='h-5 w-5' />
-              </button>
-              <div className='relative' ref={readMenuRef}>
-                <button
-                  type='button'
-                  onClick={() => setReadMenuOpen((prev) => !prev)}
-                  className='inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-full transition-colors duration-200 hover:bg-emerald-50 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200'
-                  aria-label='更多'
-                >
-                  <MoreVertical className='h-5 w-5' />
-                </button>
-                {readMenuOpen ? (
-                  <div className='absolute right-0 top-12 z-50 min-w-[9rem] overflow-hidden rounded-2xl border border-emerald-100 bg-white py-1 shadow-xl shadow-emerald-950/10 dark:border-emerald-500/10 dark:bg-gray-950'>
-                    <button
-                      type='button'
-                      onClick={() => {
-                        setReadMenuOpen(false);
-                        window.dispatchEvent(
-                          new CustomEvent('books-read-toggle-settings')
-                        );
-                      }}
-                      className='flex w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700 transition-colors duration-200 hover:bg-emerald-50 hover:text-emerald-700 dark:text-gray-200 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200'
-                    >
-                      <Settings2 className='h-4 w-4' />
-                      设置
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => {
-                        setReadMenuOpen(false);
-                        window.dispatchEvent(
-                          new CustomEvent('books-read-toggle-tts')
-                        );
-                      }}
-                      className='flex w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-700 transition-colors duration-200 hover:bg-emerald-50 hover:text-emerald-700 dark:text-gray-200 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200'
-                    >
-                      <Headphones className='h-4 w-4' />
-                      听书
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : (
-            <nav className='hidden items-center gap-2 md:flex'>
-              {tabs.map((tab) => {
-                const active = pathname === tab.href;
-                const Icon = tab.icon;
-                return (
-                  <Link
-                    key={tab.href}
-                    href={tab.href}
-                    className={`inline-flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
-                      active
-                        ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/20'
-                        : 'text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 dark:text-gray-300 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200'
-                    }`}
-                  >
-                    <Icon className='h-4 w-4' />
-                    {tab.label}
-                  </Link>
+        <List className='h-5 w-5' />
+      </button>
+      <div className='relative' ref={readMenuRef}>
+        <button
+          type='button'
+          onClick={() => setReadMenuOpen((prev) => !prev)}
+          className={iconButtonClass}
+          aria-label='更多'
+          aria-expanded={readMenuOpen}
+        >
+          <MoreVertical className='h-5 w-5' />
+        </button>
+        {readMenuOpen ? (
+          <div
+            className={cn(
+              LIBRARY_PANEL,
+              'absolute right-0 top-12 z-50 min-w-[9rem] overflow-hidden py-1 shadow-lg'
+            )}
+          >
+            <button
+              type='button'
+              onClick={() => {
+                setReadMenuOpen(false);
+                window.dispatchEvent(
+                  new CustomEvent('books-read-toggle-settings')
                 );
-              })}
-            </nav>
-          )}
-        </div>
-      </header>
-      <main
-        className={`mx-auto max-w-6xl ${
-          isRead
-            ? 'pt-[calc(4rem+env(safe-area-inset-top))]'
-            : 'px-4 pb-24 pt-[calc(6rem+env(safe-area-inset-top))]'
-        }`}
-      >
-        {children}
-      </main>
-      {!isRead && (
-        <nav className='fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-emerald-100/80 bg-white/95 shadow-[0_-12px_32px_rgba(6,95,70,0.08)] backdrop-blur-xl dark:border-emerald-500/10 dark:bg-gray-950/95 md:hidden'>
-          {tabs.map((tab) => {
-            const active = pathname === tab.href;
-            const Icon = tab.icon;
-            return (
-              <Link
-                key={tab.href}
-                href={tab.href}
-                className='flex min-h-16 cursor-pointer flex-col items-center justify-center gap-1 text-xs transition-colors duration-200 hover:bg-emerald-50 dark:hover:bg-emerald-500/10'
-              >
-                <Icon
-                  className={`h-5 w-5 ${
-                    active
-                      ? 'text-emerald-600 dark:text-emerald-300'
-                      : 'text-gray-500'
-                  }`}
-                />
-                <span
-                  className={
-                    active
-                      ? 'font-semibold text-emerald-600 dark:text-emerald-300'
-                      : 'text-gray-600 dark:text-gray-300'
-                  }
-                >
-                  {tab.label}
-                </span>
-              </Link>
-            );
-          })}
-        </nav>
-      )}
-    </div>
+              }}
+              className={LIBRARY_MENU_ITEM}
+            >
+              <Settings2 className='h-4 w-4' />
+              设置
+            </button>
+            <button
+              type='button'
+              onClick={() => {
+                setReadMenuOpen(false);
+                window.dispatchEvent(new CustomEvent('books-read-toggle-tts'));
+              }}
+              className={LIBRARY_MENU_ITEM}
+            >
+              <Headphones className='h-4 w-4' />
+              听书
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
+
+  return (
+    <MediaShell
+      siteName={siteName}
+      title={meta.title}
+      subtitle={meta.subtitle}
+      backHref={meta.backHref}
+      tabs={tabs}
+      reader={
+        isRead
+          ? { actions: readerActions, mainClassName: READER_MAIN_CLASS }
+          : undefined
+      }
+    >
+      {children}
+    </MediaShell>
   );
 }

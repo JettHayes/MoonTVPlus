@@ -7,6 +7,7 @@ import {
   Film,
   Globe,
   Images,
+  SearchCheck,
   Star,
   Tag,
   Users,
@@ -34,6 +35,7 @@ interface DetailPanelProps {
   isBangumi?: boolean;
   tmdbId?: number;
   type?: 'movie' | 'tv';
+  year?: string;
   seasonNumber?: number;
   currentEpisode?: number;
   cmsData?: {
@@ -94,6 +96,56 @@ interface GalleryImage {
   imageType: 'backdrop' | 'poster';
 }
 
+// 从多个 TMDB 搜索结果中挑选最匹配的一个
+// 依据媒体类型（单集大概率是电影）与年份辅助打分，无有效线索时降级到第一个
+const pickBestTmdbResult = (
+  results: any[],
+  hints: { mediaTypeHint?: 'movie' | 'tv'; year?: string }
+): any => {
+  if (!results || results.length === 0) return undefined;
+  if (results.length === 1) return results[0];
+
+  const { mediaTypeHint, year } = hints;
+  const targetYear = year ? parseInt(year, 10) : NaN;
+
+  const getResultYear = (r: any): number => {
+    const date =
+      r.media_type === 'movie' ? r.release_date : r.first_air_date;
+    return date ? parseInt(String(date).substring(0, 4), 10) : NaN;
+  };
+
+  let best = results[0];
+  let bestScore = -Infinity;
+
+  results.forEach((r) => {
+    let score = 0;
+
+    // 媒体类型匹配（权重最高）
+    if (mediaTypeHint && r.media_type === mediaTypeHint) {
+      score += 10;
+    }
+
+    // 年份匹配：完全一致加分最高，相差 1 年次之
+    if (!Number.isNaN(targetYear)) {
+      const ry = getResultYear(r);
+      if (!Number.isNaN(ry)) {
+        const diff = Math.abs(ry - targetYear);
+        if (diff === 0) score += 8;
+        else if (diff === 1) score += 4;
+        else if (diff <= 2) score += 1;
+      }
+    }
+
+    // 严格大于才更新，保证同分时保留靠前（更相关）的结果
+    if (score > bestScore) {
+      bestScore = score;
+      best = r;
+    }
+  });
+
+  return best;
+};
+
 const DetailPanel: React.FC<DetailPanelProps> = ({
   isOpen,
   onClose,
@@ -104,6 +156,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   isBangumi,
   tmdbId,
   type = 'movie',
+  year,
   seasonNumber,
   currentEpisode,
   cmsData,
@@ -139,6 +192,19 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   const [galleryViewportHeight, setGalleryViewportHeight] = useState(0);
   const [galleryViewportWidth, setGalleryViewportWidth] = useState(0);
   const galleryScrollRef = React.useRef<HTMLDivElement>(null);
+
+  // TMDB 搜索结果（供纠错切换）
+  const [tmdbResults, setTmdbResults] = useState<any[]>([]);
+  const [showTmdbCorrection, setShowTmdbCorrection] = useState(false);
+
+  // 集数剧照状态
+  const [showEpisodeStills, setShowEpisodeStills] = useState(false);
+  const [episodeStillsLoading, setEpisodeStillsLoading] = useState(false);
+  const [episodeStillsError, setEpisodeStillsError] = useState<string | null>(
+    null
+  );
+  const [episodeStills, setEpisodeStills] = useState<string[]>([]);
+  const [episodeStillsTitle, setEpisodeStillsTitle] = useState('');
 
   // 数据源状态管理
   const [currentSource, setCurrentSource] = useState<
@@ -192,6 +258,45 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   const handleImageClick = (imageUrl: string) => {
     setSelectedImage(imageUrl);
     setShowImageViewer(true);
+  };
+
+  // 查看某一集的剧照
+  const handleEpisodeStillsClick = async (episode: Episode) => {
+    const tmdbId = detailData?.tmdbId;
+    if (!tmdbId) return;
+
+    setEpisodeStillsTitle(`第${episode.episode_number}集 剧照`);
+    setShowEpisodeStills(true);
+    setEpisodeStillsLoading(true);
+    setEpisodeStillsError(null);
+    setEpisodeStills([]);
+
+    try {
+      const response = await fetch(
+        `/api/tmdb/episode-images?id=${tmdbId}&season=${selectedSeason}&episode=${episode.episode_number}`
+      );
+
+      if (!response.ok) {
+        throw new Error('获取剧照失败');
+      }
+
+      const data = await response.json();
+      const stills: string[] = (data.list || []).map((item: { file_path: string }) =>
+        getTMDBImageUrl(item.file_path, 'original')
+      );
+
+      // 兜底：接口无剧照时至少展示当前集封面
+      if (stills.length === 0 && episode.still_path) {
+        stills.push(getTMDBImageUrl(episode.still_path, 'original'));
+      }
+
+      setEpisodeStills(stills);
+    } catch (err) {
+      console.error('获取集数剧照失败:', err);
+      setEpisodeStillsError(err instanceof Error ? err.message : '获取剧照失败');
+    } finally {
+      setEpisodeStillsLoading(false);
+    }
   };
 
   const galleryTmdbId = detailData?.tmdbId || tmdbId;
@@ -302,6 +407,9 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   useEffect(() => {
     if (!isOpen) {
       setShowGallery(false);
+      setShowEpisodeStills(false);
+      setShowTmdbCorrection(false);
+      setTmdbResults([]);
     }
   }, [isOpen]);
 
@@ -368,6 +476,165 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
       return () => document.removeEventListener('keydown', handleEsc);
     }
   }, [isVisible, onClose]);
+
+  // 从标题中解析搜索关键词与季度号
+  const parseTmdbSearchInfo = () => {
+    let searchTitle = title;
+    let extractedSeasonNumber = seasonNumber;
+
+    // 匹配各种季度格式: 第一季、第1季、第一部、Season 1、S1等
+    const seasonPatterns = [
+      /第([一二三四五六七八九十\d]+)[季部]/,
+      /Season\s*(\d+)/i,
+      /S(\d+)/i,
+    ];
+
+    for (const pattern of seasonPatterns) {
+      const match = title.match(pattern);
+      if (match) {
+        searchTitle = title.replace(pattern, '').trim();
+        if (!extractedSeasonNumber) {
+          const seasonStr = match[1];
+          const chineseNumbers: Record<string, number> = {
+            一: 1,
+            二: 2,
+            三: 3,
+            四: 4,
+            五: 5,
+            六: 6,
+            七: 7,
+            八: 8,
+            九: 9,
+            十: 10,
+          };
+          extractedSeasonNumber =
+            chineseNumbers[seasonStr] || parseInt(seasonStr) || undefined;
+        }
+        break;
+      }
+    }
+
+    return { searchTitle, extractedSeasonNumber };
+  };
+
+  // 推断媒体类型：集数是更强的线索（单集大概率是电影，多集为剧集），
+  // 无集数信息时降级用调用方传入的 type
+  const getMediaTypeHint = (): 'movie' | 'tv' | undefined => {
+    const episodesCount = cmsData?.episodes?.length;
+    if (typeof episodesCount === 'number' && episodesCount > 0) {
+      return episodesCount === 1 ? 'movie' : 'tv';
+    }
+    return type;
+  };
+
+  // 根据指定的搜索结果加载 TMDB 详情
+  const applyTmdbResult = async (
+    result: any,
+    extractedSeasonNumber?: number
+  ) => {
+    const detailId = result.id;
+    const mediaType = result.media_type || type;
+
+    // 获取详情
+    const detailResponse = await fetch(
+      `/api/tmdb/detail?id=${detailId}&type=${mediaType}`
+    );
+    if (!detailResponse.ok) {
+      throw new Error('获取TMDB详情失败');
+    }
+    const detailResult = await detailResponse.json();
+
+    // 如果有季度信息,尝试获取季度详情
+    let seasonDetail = null;
+    if (extractedSeasonNumber && mediaType === 'tv') {
+      try {
+        const seasonResponse = await fetch(
+          `/api/tmdb/episodes?id=${detailId}&season=${extractedSeasonNumber}`
+        );
+        if (seasonResponse.ok) {
+          seasonDetail = await seasonResponse.json();
+        }
+      } catch (err) {
+        console.error('获取季度信息失败', err);
+      }
+    }
+
+    setDetailData({
+      title:
+        mediaType === 'movie'
+          ? detailResult.title
+          : seasonDetail?.name
+          ? `${detailResult.name} ${seasonDetail.name}`
+          : detailResult.name,
+      originalTitle:
+        mediaType === 'movie'
+          ? detailResult.original_title
+          : detailResult.original_name,
+      year:
+        mediaType === 'movie'
+          ? detailResult.release_date?.substring(0, 4)
+          : seasonDetail?.air_date?.substring(0, 4) ||
+            detailResult.first_air_date?.substring(0, 4),
+      poster:
+        seasonDetail?.poster_path || detailResult.poster_path
+          ? processImageUrl(
+              getTMDBImageUrl(
+                seasonDetail?.poster_path || detailResult.poster_path,
+                'w500'
+              )
+            )
+          : poster,
+      rating: detailResult.vote_average
+        ? {
+            value: detailResult.vote_average,
+            count: detailResult.vote_count,
+          }
+        : undefined,
+      intro: seasonDetail?.overview || detailResult.overview,
+      genres: detailResult.genres?.map((g: any) => g.name),
+      countries: detailResult.production_countries?.map((c: any) => c.name),
+      languages: detailResult.spoken_languages?.map((l: any) => l.name),
+      duration: detailResult.runtime
+        ? `${detailResult.runtime}分钟`
+        : undefined,
+      episodesCount:
+        seasonDetail?.episodes?.length || detailResult.number_of_episodes,
+      releaseDate:
+        mediaType === 'movie'
+          ? detailResult.release_date
+          : seasonDetail?.air_date || detailResult.first_air_date,
+      status: detailResult.status,
+      tagline: detailResult.tagline,
+      seasons: detailResult.number_of_seasons,
+      overview: detailResult.overview,
+      tmdbId: detailId,
+      mediaType: mediaType,
+      seasonNumber: extractedSeasonNumber,
+      seriesTitle: mediaType === 'tv' ? detailResult.name : undefined,
+    });
+    setCurrentSource('tmdb');
+  };
+
+  // 用户从纠错面板中选择某个搜索结果
+  const handleSelectTmdbResult = async (result: any) => {
+    setShowTmdbCorrection(false);
+    setLoading(true);
+    setError(null);
+    // 重置季度/集数,交给对应 effect 重新加载
+    setSeasonData(null);
+    setSeasonsLoaded(false);
+
+    try {
+      const { extractedSeasonNumber } = parseTmdbSearchInfo();
+      await applyTmdbResult(result, extractedSeasonNumber);
+    } catch (err) {
+      console.error('切换TMDB结果失败:', err);
+      setError(err instanceof Error ? err.message : '切换失败');
+      setCurrentSource('tmdb');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // 获取详情数据
   useEffect(() => {
@@ -523,43 +790,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
     // 提取 TMDB 数据获取逻辑为独立函数
     const fetchTmdbData = async () => {
       setCurrentSource('tmdb');
-      // 移除季度信息进行搜索
-      let searchTitle = title;
-      let extractedSeasonNumber = seasonNumber;
-
-      // 匹配各种季度格式: 第一季、第1季、第一部、Season 1、S1等
-      const seasonPatterns = [
-        /第([一二三四五六七八九十\d]+)[季部]/,
-        /Season\s*(\d+)/i,
-        /S(\d+)/i,
-      ];
-
-      for (const pattern of seasonPatterns) {
-        const match = title.match(pattern);
-        if (match) {
-          searchTitle = title.replace(pattern, '').trim();
-          // 如果没有传入seasonNumber,尝试从标题中提取
-          if (!extractedSeasonNumber) {
-            const seasonStr = match[1];
-            // 中文数字转数字
-            const chineseNumbers: Record<string, number> = {
-              一: 1,
-              二: 2,
-              三: 3,
-              四: 4,
-              五: 5,
-              六: 6,
-              七: 7,
-              八: 8,
-              九: 9,
-              十: 10,
-            };
-            extractedSeasonNumber =
-              chineseNumbers[seasonStr] || parseInt(seasonStr) || undefined;
-          }
-          break;
-        }
-      }
+      const { searchTitle, extractedSeasonNumber } = parseTmdbSearchInfo();
 
       const searchResponse = await fetch(
         `/api/tmdb/search?query=${encodeURIComponent(searchTitle)}`
@@ -570,87 +801,13 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
       const searchData = await searchResponse.json();
 
       if (searchData.results && searchData.results.length > 0) {
-        const result = searchData.results[0];
-        const detailId = result.id;
-        const mediaType = result.media_type || type;
-
-        // 获取详情
-        const detailResponse = await fetch(
-          `/api/tmdb/detail?id=${detailId}&type=${mediaType}`
-        );
-        if (!detailResponse.ok) {
-          throw new Error('获取TMDB详情失败');
-        }
-        const detailResult = await detailResponse.json();
-
-        // 如果有季度信息,尝试获取季度详情
-        let seasonData = null;
-        if (extractedSeasonNumber && mediaType === 'tv') {
-          try {
-            const seasonResponse = await fetch(
-              `/api/tmdb/episodes?id=${detailId}&season=${extractedSeasonNumber}`
-            );
-            if (seasonResponse.ok) {
-              seasonData = await seasonResponse.json();
-            }
-          } catch (err) {
-            console.error('获取季度信息失败', err);
-          }
-        }
-
-        setDetailData({
-          title:
-            mediaType === 'movie'
-              ? detailResult.title
-              : seasonData?.name
-              ? `${detailResult.name} ${seasonData.name}`
-              : detailResult.name,
-          originalTitle:
-            mediaType === 'movie'
-              ? detailResult.original_title
-              : detailResult.original_name,
-          year:
-            mediaType === 'movie'
-              ? detailResult.release_date?.substring(0, 4)
-              : seasonData?.air_date?.substring(0, 4) ||
-                detailResult.first_air_date?.substring(0, 4),
-          poster:
-            seasonData?.poster_path || detailResult.poster_path
-              ? processImageUrl(
-                  getTMDBImageUrl(
-                    seasonData?.poster_path || detailResult.poster_path,
-                    'w500'
-                  )
-                )
-              : poster,
-          rating: detailResult.vote_average
-            ? {
-                value: detailResult.vote_average,
-                count: detailResult.vote_count,
-              }
-            : undefined,
-          intro: seasonData?.overview || detailResult.overview,
-          genres: detailResult.genres?.map((g: any) => g.name),
-          countries: detailResult.production_countries?.map((c: any) => c.name),
-          languages: detailResult.spoken_languages?.map((l: any) => l.name),
-          duration: detailResult.runtime
-            ? `${detailResult.runtime}分钟`
-            : undefined,
-          episodesCount:
-            seasonData?.episodes?.length || detailResult.number_of_episodes,
-          releaseDate:
-            mediaType === 'movie'
-              ? detailResult.release_date
-              : seasonData?.air_date || detailResult.first_air_date,
-          status: detailResult.status,
-          tagline: detailResult.tagline,
-          seasons: detailResult.number_of_seasons,
-          overview: detailResult.overview,
-          tmdbId: detailId,
-          mediaType: mediaType,
-          seasonNumber: extractedSeasonNumber,
-          seriesTitle: mediaType === 'tv' ? detailResult.name : undefined,
+        // 保存全部搜索结果,供纠错切换
+        setTmdbResults(searchData.results);
+        const best = pickBestTmdbResult(searchData.results, {
+          mediaTypeHint: getMediaTypeHint(),
+          year,
         });
+        await applyTmdbResult(best, extractedSeasonNumber);
         return;
       }
 
@@ -666,6 +823,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
     tmdbId,
     title,
     type,
+    year,
     seasonNumber,
     poster,
     cmsData,
@@ -707,43 +865,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 
   // 用于切换时获取 TMDB 数据
   const fetchTmdbDataForToggle = async () => {
-    // 移除季度信息进行搜索
-    let searchTitle = title;
-    let extractedSeasonNumber = seasonNumber;
-
-    // 匹配各种季度格式: 第一季、第1季、第一部、Season 1、S1等
-    const seasonPatterns = [
-      /第([一二三四五六七八九十\d]+)[季部]/,
-      /Season\s*(\d+)/i,
-      /S(\d+)/i,
-    ];
-
-    for (const pattern of seasonPatterns) {
-      const match = title.match(pattern);
-      if (match) {
-        searchTitle = title.replace(pattern, '').trim();
-        // 如果没有传入seasonNumber,尝试从标题中提取
-        if (!extractedSeasonNumber) {
-          const seasonStr = match[1];
-          // 中文数字转数字
-          const chineseNumbers: Record<string, number> = {
-            一: 1,
-            二: 2,
-            三: 3,
-            四: 4,
-            五: 5,
-            六: 6,
-            七: 7,
-            八: 8,
-            九: 9,
-            十: 10,
-          };
-          extractedSeasonNumber =
-            chineseNumbers[seasonStr] || parseInt(seasonStr) || undefined;
-        }
-        break;
-      }
-    }
+    const { searchTitle, extractedSeasonNumber } = parseTmdbSearchInfo();
 
     const searchResponse = await fetch(
       `/api/tmdb/search?query=${encodeURIComponent(searchTitle)}`
@@ -754,88 +876,13 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
     const searchData = await searchResponse.json();
 
     if (searchData.results && searchData.results.length > 0) {
-      const result = searchData.results[0];
-      const detailId = result.id;
-      const mediaType = result.media_type || type;
-
-      // 获取详情
-      const detailResponse = await fetch(
-        `/api/tmdb/detail?id=${detailId}&type=${mediaType}`
-      );
-      if (!detailResponse.ok) {
-        throw new Error('获取TMDB详情失败');
-      }
-      const detailResult = await detailResponse.json();
-
-      // 如果有季度信息,尝试获取季度详情
-      let seasonData = null;
-      if (extractedSeasonNumber && mediaType === 'tv') {
-        try {
-          const seasonResponse = await fetch(
-            `/api/tmdb/episodes?id=${detailId}&season=${extractedSeasonNumber}`
-          );
-          if (seasonResponse.ok) {
-            seasonData = await seasonResponse.json();
-          }
-        } catch (err) {
-          console.error('获取季度信息失败', err);
-        }
-      }
-
-      setDetailData({
-        title:
-          mediaType === 'movie'
-            ? detailResult.title
-            : seasonData?.name
-            ? `${detailResult.name} ${seasonData.name}`
-            : detailResult.name,
-        originalTitle:
-          mediaType === 'movie'
-            ? detailResult.original_title
-            : detailResult.original_name,
-        year:
-          mediaType === 'movie'
-            ? detailResult.release_date?.substring(0, 4)
-            : seasonData?.air_date?.substring(0, 4) ||
-              detailResult.first_air_date?.substring(0, 4),
-        poster:
-          seasonData?.poster_path || detailResult.poster_path
-            ? processImageUrl(
-                getTMDBImageUrl(
-                  seasonData?.poster_path || detailResult.poster_path,
-                  'w500'
-                )
-              )
-            : poster,
-        rating: detailResult.vote_average
-          ? {
-              value: detailResult.vote_average,
-              count: detailResult.vote_count,
-            }
-          : undefined,
-        intro: seasonData?.overview || detailResult.overview,
-        genres: detailResult.genres?.map((g: any) => g.name),
-        countries: detailResult.production_countries?.map((c: any) => c.name),
-        languages: detailResult.spoken_languages?.map((l: any) => l.name),
-        duration: detailResult.runtime
-          ? `${detailResult.runtime}分钟`
-          : undefined,
-        episodesCount:
-          seasonData?.episodes?.length || detailResult.number_of_episodes,
-        releaseDate:
-          mediaType === 'movie'
-            ? detailResult.release_date
-            : seasonData?.air_date || detailResult.first_air_date,
-        status: detailResult.status,
-        tagline: detailResult.tagline,
-        seasons: detailResult.number_of_seasons,
-        overview: detailResult.overview,
-        tmdbId: detailId,
-        mediaType: mediaType,
-        seasonNumber: extractedSeasonNumber,
-        seriesTitle: mediaType === 'tv' ? detailResult.name : undefined,
+      // 保存全部搜索结果,供纠错切换
+      setTmdbResults(searchData.results);
+      const best = pickBestTmdbResult(searchData.results, {
+        mediaTypeHint: getMediaTypeHint(),
+        year,
       });
-      setCurrentSource('tmdb');
+      await applyTmdbResult(best, extractedSeasonNumber);
       return;
     }
 
@@ -862,21 +909,31 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
         );
         if (!seasonsResponse.ok) return;
         const seasonsData = await seasonsResponse.json();
+        const seasons: any[] = seasonsData.seasons || [];
 
-        // 设置默认选中季度
-        const defaultSeason = detailData.seasonNumber || 1;
+        // 计算默认选中季度：优先用标题提取的季度号，
+        // 若该季度号不在实际季度列表中，则降级到第一个有效季度
+        const preferredSeason = detailData.seasonNumber || 1;
+        const hasPreferred = seasons.some(
+          (s: any) => s.season_number === preferredSeason
+        );
+        const defaultSeason = hasPreferred
+          ? preferredSeason
+          : seasons[0]?.season_number ?? preferredSeason;
         setSelectedSeason(defaultSeason);
 
         // 获取默认季度的集数详情
         const episodesResponse = await fetch(
           `/api/tmdb/episodes?id=${detailData.tmdbId}&season=${defaultSeason}`
         );
-        if (!episodesResponse.ok) return;
-        const episodesData = await episodesResponse.json();
+        const episodesData = episodesResponse.ok
+          ? await episodesResponse.json()
+          : null;
 
+        // 即使集数获取失败，也保留季度列表，避免整个区块消失
         setSeasonData({
-          seasons: seasonsData.seasons || [],
-          episodes: episodesData.episodes || [],
+          seasons,
+          episodes: episodesData?.episodes || [],
         });
         setSeasonsLoaded(true);
       } catch (err) {
@@ -1348,6 +1405,203 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
     )
   ) : null;
 
+  const episodeStillsHeader = (
+    <div className='flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800'>
+      <div>
+        <h3 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>
+          {episodeStillsTitle || '剧照'}
+        </h3>
+        {!episodeStillsLoading && !episodeStillsError && (
+          <p className='text-sm text-gray-500 dark:text-gray-400'>
+            共 {episodeStills.length} 张
+          </p>
+        )}
+      </div>
+      <button
+        onClick={() => setShowEpisodeStills(false)}
+        className='p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors'
+        aria-label='关闭剧照'
+      >
+        <X size={20} className='text-gray-500 dark:text-gray-400' />
+      </button>
+    </div>
+  );
+
+  const episodeStillsBody = (
+    <div className='flex-1 overflow-y-auto overflow-x-hidden p-4'>
+      {episodeStillsLoading && (
+        <div className='flex items-center justify-center py-20'>
+          <div className='animate-spin rounded-full h-10 w-10 border-b-2 border-green-500'></div>
+        </div>
+      )}
+
+      {!episodeStillsLoading && episodeStillsError && (
+        <div className='text-center py-12 text-red-500 dark:text-red-400'>
+          {episodeStillsError}
+        </div>
+      )}
+
+      {!episodeStillsLoading &&
+        !episodeStillsError &&
+        episodeStills.length === 0 && (
+          <div className='text-center py-12 text-gray-500 dark:text-gray-400'>
+            暂无剧照
+          </div>
+        )}
+
+      {!episodeStillsLoading &&
+        !episodeStillsError &&
+        episodeStills.length > 0 && (
+          <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
+            {episodeStills.map((stillUrl, index) => (
+              <div
+                key={`${stillUrl}-${index}`}
+                className='relative aspect-video overflow-hidden rounded-md bg-gray-100 dark:bg-gray-800 cursor-pointer hover:opacity-90 transition-opacity'
+                onClick={() => handleImageClick(stillUrl)}
+              >
+                <ProxyImage
+                  originalSrc={stillUrl}
+                  alt={`${episodeStillsTitle}-${index + 1}`}
+                  className='absolute inset-0 w-full h-full object-cover'
+                  draggable={false}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+    </div>
+  );
+
+  const episodeStillsModal = showEpisodeStills ? (
+    useDrawer ? (
+      <div className='fixed inset-0 z-[10000] flex items-center justify-end pointer-events-none'>
+        <div
+          className={`relative ${drawerWidth} h-full bg-white dark:bg-gray-900 shadow-2xl overflow-hidden flex flex-col pointer-events-auto`}
+        >
+          {episodeStillsHeader}
+          {episodeStillsBody}
+        </div>
+      </div>
+    ) : (
+      <div className='fixed inset-0 z-[10000] flex items-center justify-center p-4'>
+        <div
+          className='absolute inset-0 bg-black/60'
+          onClick={() => setShowEpisodeStills(false)}
+        />
+        <div className='relative w-full max-w-4xl max-h-[90vh] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl overflow-hidden flex flex-col'>
+          {episodeStillsHeader}
+          {episodeStillsBody}
+        </div>
+      </div>
+    )
+  ) : null;
+
+  const tmdbCorrectionHeader = (
+    <div className='flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800'>
+      <div>
+        <h3 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>
+          纠正匹配
+        </h3>
+        <p className='text-sm text-gray-500 dark:text-gray-400'>
+          选择正确的条目
+        </p>
+      </div>
+      <button
+        onClick={() => setShowTmdbCorrection(false)}
+        className='p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors'
+        aria-label='关闭纠错'
+      >
+        <X size={20} className='text-gray-500 dark:text-gray-400' />
+      </button>
+    </div>
+  );
+
+  const tmdbCorrectionBody = (
+    <div className='flex-1 overflow-y-auto overflow-x-hidden p-4'>
+      <div className='flex flex-col gap-2'>
+        {tmdbResults.map((result: any) => {
+          const resultTitle = result.title || result.name || '未知标题';
+          const resultDate = result.release_date || result.first_air_date || '';
+          const resultYear = resultDate ? resultDate.substring(0, 4) : '';
+          const resultPoster = result.poster_path
+            ? getTMDBImageUrl(result.poster_path, 'w92')
+            : '';
+          const isActive = detailData?.tmdbId === result.id;
+          return (
+            <div
+              key={`${result.media_type}-${result.id}`}
+              onClick={() => handleSelectTmdbResult(result)}
+              className={`flex items-start gap-3 p-2 rounded-lg cursor-pointer transition-colors ${
+                isActive
+                  ? 'bg-green-100 dark:bg-green-900/30 ring-2 ring-green-500'
+                  : 'bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
+              }`}
+            >
+              <div className='relative w-12 h-16 rounded overflow-hidden bg-gray-200 dark:bg-gray-700 flex-shrink-0'>
+                {resultPoster ? (
+                  <ProxyImage
+                    originalSrc={resultPoster}
+                    alt={resultTitle}
+                    className='absolute inset-0 w-full h-full object-cover'
+                    draggable={false}
+                  />
+                ) : (
+                  <div className='w-full h-full flex items-center justify-center'>
+                    <Film size={20} className='text-gray-400' />
+                  </div>
+                )}
+              </div>
+              <div className='flex-1 min-w-0'>
+                <div className='flex items-center gap-2'>
+                  <p className='text-sm font-medium text-gray-900 dark:text-gray-100 truncate'>
+                    {resultTitle}
+                  </p>
+                  <span className='flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'>
+                    {result.media_type === 'tv' ? '剧集' : '电影'}
+                  </span>
+                </div>
+                {resultYear && (
+                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-0.5'>
+                    {resultYear}
+                  </p>
+                )}
+                {result.overview && (
+                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2'>
+                    {result.overview}
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const tmdbCorrectionModal = showTmdbCorrection ? (
+    useDrawer ? (
+      <div className='fixed inset-0 z-[10000] flex items-center justify-end pointer-events-none'>
+        <div
+          className={`relative ${drawerWidth} h-full bg-white dark:bg-gray-900 shadow-2xl overflow-hidden flex flex-col pointer-events-auto`}
+        >
+          {tmdbCorrectionHeader}
+          {tmdbCorrectionBody}
+        </div>
+      </div>
+    ) : (
+      <div className='fixed inset-0 z-[10000] flex items-center justify-center p-4'>
+        <div
+          className='absolute inset-0 bg-black/60'
+          onClick={() => setShowTmdbCorrection(false)}
+        />
+        <div className='relative w-full max-w-lg max-h-[90vh] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl overflow-hidden flex flex-col'>
+          {tmdbCorrectionHeader}
+          {tmdbCorrectionBody}
+        </div>
+      </div>
+    )
+  ) : null;
+
   if (!isVisible || !mounted) return null;
 
   const content = useDrawer ? (
@@ -1364,6 +1618,19 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             详情
           </h2>
           <div className='flex items-center gap-2'>
+            {currentSource === 'tmdb' && tmdbResults.length > 1 && (
+              <button
+                onClick={() => setShowTmdbCorrection(true)}
+                className='p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-150'
+                title='匹配错误?点此纠正'
+                aria-label='纠正匹配结果'
+              >
+                <SearchCheck
+                  size={18}
+                  className='text-gray-500 dark:text-gray-400'
+                />
+              </button>
+            )}
             {externalUrl && (
               <button
                 onClick={() =>
@@ -1813,13 +2080,9 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                                       <div
                                         className='relative w-full h-36 rounded overflow-hidden bg-gray-200 dark:bg-gray-700 mb-2 cursor-pointer hover:opacity-90 transition-opacity'
                                         onClick={() =>
-                                          handleImageClick(
-                                            getTMDBImageUrl(
-                                              episode.still_path,
-                                              'w500'
-                                            )
-                                          )
+                                          handleEpisodeStillsClick(episode)
                                         }
+                                        title='查看该集剧照'
                                       >
                                         <ProxyImage
                                           originalSrc={getTMDBImageUrl(
@@ -1924,6 +2187,8 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 
       {/* 图片查看器 */}
       {galleryModal}
+      {episodeStillsModal}
+      {tmdbCorrectionModal}
       {showImageViewer && (
         <ImageViewer
           isOpen={showImageViewer}
@@ -1965,6 +2230,19 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
             详情
           </h2>
           <div className='flex items-center gap-2'>
+            {currentSource === 'tmdb' && tmdbResults.length > 1 && (
+              <button
+                onClick={() => setShowTmdbCorrection(true)}
+                className='p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-150'
+                title='匹配错误?点此纠正'
+                aria-label='纠正匹配结果'
+              >
+                <SearchCheck
+                  size={18}
+                  className='text-gray-500 dark:text-gray-400'
+                />
+              </button>
+            )}
             {externalUrl && (
               <button
                 onClick={() =>
@@ -2411,13 +2689,9 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                                       <div
                                         className='relative w-full h-36 rounded overflow-hidden bg-gray-200 dark:bg-gray-700 mb-2 cursor-pointer hover:opacity-90 transition-opacity'
                                         onClick={() =>
-                                          handleImageClick(
-                                            getTMDBImageUrl(
-                                              episode.still_path,
-                                              'w500'
-                                            )
-                                          )
+                                          handleEpisodeStillsClick(episode)
                                         }
+                                        title='查看该集剧照'
                                       >
                                         <ProxyImage
                                           originalSrc={getTMDBImageUrl(
@@ -2519,6 +2793,8 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 
       {/* 图片查看器 */}
       {galleryModal}
+      {episodeStillsModal}
+      {tmdbCorrectionModal}
       {showImageViewer && (
         <ImageViewer
           isOpen={showImageViewer}

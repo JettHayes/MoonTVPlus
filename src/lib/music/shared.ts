@@ -1,12 +1,21 @@
 import React from 'react';
 import type { MusicSource, Song } from '@/lib/music/types';
 
-export const musicSources: Array<{ key: MusicSource; label: string }> = [
-  { key: 'wy', label: '网易云' },
-  { key: 'tx', label: 'QQ' },
-  { key: 'kw', label: '酷我' },
-  { key: 'kg', label: '酷狗' },
-  { key: 'mg', label: '咪咕' },
+/**
+ * 五个音源。monogram 是标识方块里那两个字母——酷我/酷狗首字都是"酷"，
+ * 拿首字会撞车，所以用平台自己惯用的缩写。方块只表示"这是哪一个"，
+ * 表示"选中了它"是另一回事（走主题色），两者不共用同一个通道。
+ */
+export const musicSources: Array<{
+  key: MusicSource;
+  label: string;
+  monogram: string;
+}> = [
+  { key: 'wy', label: '网易云', monogram: 'WY' },
+  { key: 'tx', label: 'QQ', monogram: 'TX' },
+  { key: 'kw', label: '酷我', monogram: 'KW' },
+  { key: 'kg', label: '酷狗', monogram: 'KG' },
+  { key: 'mg', label: '咪咕', monogram: 'MG' },
 ];
 
 export function normalizeSource(source: string | undefined | null): MusicSource {

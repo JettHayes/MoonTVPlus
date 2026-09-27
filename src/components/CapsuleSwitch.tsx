@@ -30,6 +30,8 @@ const CapsuleSwitch: React.FC<CapsuleSwitchProps> = ({
   }>({ left: 0, width: 0 });
 
   const activeIndex = options.findIndex((opt) => opt.value === active);
+  // 选项集合变化时需要重新定位（如联动切换后默认项回到第 0 个，activeIndex 不变）
+  const optionsSignature = options.map((opt) => opt.value).join(',');
 
   // 更新指示器位置（仅更新位置，不触发滚动）
   const updateIndicatorPosition = (autoScroll = false) => {
@@ -81,11 +83,11 @@ const CapsuleSwitch: React.FC<CapsuleSwitchProps> = ({
     return () => clearTimeout(timeoutId);
   }, []);
 
-  // 监听选中项变化，自动滚动到新选中项
+  // 监听选中项或选项集合变化，自动滚动到新选中项并更新指示条
   useEffect(() => {
     const timeoutId = setTimeout(() => updateIndicatorPosition(true), 0);
     return () => clearTimeout(timeoutId);
-  }, [activeIndex]);
+  }, [activeIndex, optionsSignature]);
 
   // 监听滚动事件，仅更新指示器位置
   useEffect(() => {

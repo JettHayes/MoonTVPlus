@@ -52,6 +52,7 @@ sitemap-*.xml
 # generated files
 src/lib/runtime.ts
 public/manifest.json
+public/libbitsub/
 
 # PWA files
 public/sw.js

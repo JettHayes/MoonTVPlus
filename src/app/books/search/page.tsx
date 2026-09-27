@@ -1,13 +1,6 @@
 'use client';
 
-import {
-  BookMarked,
-  Layers3,
-  Loader2,
-  Search,
-  Sparkles,
-  X,
-} from 'lucide-react';
+import { Loader2, Search, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   startTransition,
@@ -23,30 +16,38 @@ import {
   buildBookDetailPath,
   cacheBookListItem,
 } from '@/lib/book-route-cache.client';
+import { cn } from '@/lib/cn';
 
-import BookCard from '@/components/books/BookCard';
+import { bookCardItem } from '@/components/media/adapters';
+import EmptyState from '@/components/media/EmptyState';
+import {
+  LIBRARY_BUTTON,
+  LIBRARY_FIELD,
+  LIBRARY_FOCUS,
+  LIBRARY_GHOST_BUTTON,
+  LIBRARY_MUTED,
+  LIBRARY_PANEL,
+  LIBRARY_PROGRESS_BAR,
+  LIBRARY_PROGRESS_TRACK,
+  LIBRARY_SERIF,
+  LIBRARY_TEXT,
+} from '@/components/media/library';
+import MediaCard from '@/components/media/MediaCard';
+import MediaGrid from '@/components/media/MediaGrid';
+import MediaGridSkeleton from '@/components/media/MediaGridSkeleton';
+import MediaSectionHeader from '@/components/media/MediaSectionHeader';
 
 type RuntimeWindow = Window & { RUNTIME_CONFIG?: { FLUID_SEARCH?: boolean } };
 
+const PANEL_CLASS = cn(LIBRARY_PANEL, 'p-5 sm:p-6');
+const FIELD_CLASS = cn(LIBRARY_FIELD, 'h-12 py-0');
+const CHIP_CLASS = cn(
+  LIBRARY_GHOST_BUTTON,
+  'cursor-pointer gap-1.5 rounded-full px-3 py-1.5 text-xs'
+);
+
 function detailHref(item: BookListItem) {
   return buildBookDetailPath(item.sourceId, item.id);
-}
-
-function SearchSkeleton() {
-  return (
-    <div className='grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-6 animate-pulse'>
-      {Array.from({ length: 12 }).map((_, index) => (
-        <div
-          key={index}
-          className='overflow-hidden rounded-[1.75rem] border border-emerald-100/70 bg-white/70 p-3 shadow-sm dark:border-emerald-500/10 dark:bg-gray-950/50'
-        >
-          <div className='aspect-[3/4] rounded-2xl bg-gradient-to-br from-emerald-100 to-amber-100 dark:from-gray-800 dark:to-emerald-950/30' />
-          <div className='mt-3 h-4 w-3/4 rounded bg-emerald-100 dark:bg-gray-800' />
-          <div className='mt-2 h-3 w-1/2 rounded bg-emerald-100/80 dark:bg-gray-800' />
-        </div>
-      ))}
-    </div>
-  );
 }
 
 const BOOK_SEARCH_STATE_KEY = 'book_search_state';
@@ -66,6 +67,10 @@ export default function BooksSearchPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
+  // 已经**执行过**的那次搜索用的书源，用来标注「当前范围」。
+  // 不能直接拿下拉框的值：下拉框是下一次搜索的参数，它一变就改写标注的话，
+  // 标注会和下面那批书对不上（下拉切到 A，展示的还是 B 的结果）。
+  const [executedScope, setExecutedScope] = useState('');
   const [totalSources, setTotalSources] = useState(0);
   const [completedSources, setCompletedSources] = useState(0);
   const [useFluidSearch, setUseFluidSearch] = useState(true);
@@ -215,6 +220,7 @@ export default function BooksSearchPage() {
       setLoading(true);
       setError('');
       setHasSearched(true);
+      setExecutedScope(normalizedSourceId);
       setTotalSources(0);
       setCompletedSources(0);
 
@@ -417,6 +423,7 @@ export default function BooksSearchPage() {
           setSourceId(cachedState.sourceId || '');
           setResult(cachedState.result || EMPTY_RESULT);
           setHasSearched(true);
+          setExecutedScope(cachedState.sourceId || '');
         }
         return;
       }
@@ -430,6 +437,7 @@ export default function BooksSearchPage() {
       setResult(EMPTY_RESULT);
       setLoading(false);
       setHasSearched(false);
+      setExecutedScope('');
       setTotalSources(0);
       setCompletedSources(0);
       setError('');
@@ -464,10 +472,18 @@ export default function BooksSearchPage() {
     }
   };
 
-  const selectedSourceName = useMemo(() => {
-    if (!sourceId) return '全部书源';
-    return sources.find((source) => source.id === sourceId)?.name || '当前书源';
-  }, [sourceId, sources]);
+  // 书源是单选：选了某一个源时「当前范围」就是它本身，后面再缀一个总源数
+  // 只会让人以为这次搜了 2 个源。只有「全部书源」才需要靠数量说明范围多大。
+  const scopeLabel = useMemo(() => {
+    if (executedScope) {
+      return (
+        sources.find((source) => source.id === executedScope)?.name ||
+        '当前书源'
+      );
+    }
+    if (sources.length === 0) return '全部书源';
+    return `全部书源 · ${sources.length} 个书源`;
+  }, [executedScope, sources]);
 
   const searchProgress =
     totalSources > 0
@@ -488,178 +504,168 @@ export default function BooksSearchPage() {
   );
 
   return (
-    <div className='space-y-7'>
-      <section className='relative overflow-hidden rounded-[2.25rem] border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-amber-50 p-5 shadow-sm shadow-emerald-950/5 dark:border-emerald-500/10 dark:from-emerald-950/30 dark:via-gray-950 dark:to-amber-950/20 sm:p-7'>
-        <div className='absolute -right-20 -top-24 h-64 w-64 rounded-full bg-emerald-300/25 blur-3xl dark:bg-emerald-500/10' />
-        <div className='absolute -bottom-28 left-1/4 h-64 w-64 rounded-full bg-amber-300/20 blur-3xl dark:bg-amber-500/10' />
-        <div className='relative'>
-          <div className='inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/75 px-3 py-1 text-xs font-semibold text-emerald-700 shadow-sm backdrop-blur dark:border-emerald-500/20 dark:bg-gray-950/50 dark:text-emerald-200'>
-            <Sparkles className='h-3.5 w-3.5' />
-            Search First · Reduce Friction
-          </div>
+    <div className='space-y-6'>
+      <section className={PANEL_CLASS}>
+        <h1
+          className={cn('text-2xl font-semibold', LIBRARY_TEXT, LIBRARY_SERIF)}
+        >
+          搜索电子书
+        </h1>
+        <p className={cn('mt-2 text-sm', LIBRARY_MUTED)}>
+          按书名或作者搜索全部已配置的书源。
+        </p>
 
-          <div className='mt-5 grid gap-6 lg:grid-cols-[0.95fr_1.05fr] lg:items-end'>
-            <div>
-              <h1 className='text-4xl font-black tracking-[-0.06em] text-emerald-950 dark:text-emerald-50 sm:text-6xl lg:text-7xl'>
-                找到下一本书
-              </h1>
-              <div className='mt-5 flex flex-wrap gap-2'>
-                {QUICK_SEARCHES.map((keyword) => (
-                  <button
-                    key={keyword}
-                    type='button'
-                    onClick={() => {
-                      setQ(keyword);
-                      submitSearch(keyword);
-                    }}
-                    className='inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-emerald-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-emerald-800 transition-colors duration-200 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-emerald-500/20 dark:bg-gray-950/50 dark:text-emerald-100 dark:hover:bg-emerald-500/10'
-                  >
-                    <Search className='h-3.5 w-3.5' />
-                    {keyword}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <form
-              onSubmit={handleSubmit}
-              className='rounded-[2rem] border border-white/80 bg-white/85 p-3 shadow-xl shadow-emerald-950/10 backdrop-blur dark:border-white/10 dark:bg-gray-950/70'
+        <div className='mt-4 flex flex-wrap gap-2'>
+          {QUICK_SEARCHES.map((keyword) => (
+            <button
+              key={keyword}
+              type='button'
+              onClick={() => {
+                setQ(keyword);
+                submitSearch(keyword);
+              }}
+              className={CHIP_CLASS}
             >
-              <div className='grid gap-3 lg:grid-cols-[1fr_13rem_auto]'>
-                <label className='relative block'>
-                  <span className='mb-2 block px-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-200'>
-                    关键词
-                  </span>
-                  <Search className='pointer-events-none absolute bottom-3.5 left-4 h-5 w-5 text-emerald-400' />
-                  <input
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder='搜索书名 / 作者'
-                    className='h-12 w-full rounded-2xl border border-emerald-100 bg-white pl-11 pr-11 text-base font-medium text-slate-900 outline-none transition-colors duration-200 placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20 dark:border-emerald-500/10 dark:bg-gray-900 dark:text-white'
-                  />
-                  {q ? (
-                    <button
-                      type='button'
-                      onClick={() => setQ('')}
-                      className='absolute bottom-2.5 right-2.5 inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full text-slate-400 transition-colors duration-200 hover:bg-emerald-50 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-200'
-                      aria-label='清空搜索关键词'
-                    >
-                      <X className='h-4 w-4' />
-                    </button>
-                  ) : null}
-                </label>
-
-                <label className='block'>
-                  <span className='mb-2 block px-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-200'>
-                    书源
-                  </span>
-                  <select
-                    value={sourceId}
-                    onChange={(e) => setSourceId(e.target.value)}
-                    className='h-12 w-full cursor-pointer rounded-2xl border border-emerald-100 bg-white px-4 text-sm font-medium text-slate-900 outline-none transition-colors duration-200 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20 dark:border-emerald-500/10 dark:bg-gray-900 dark:text-white'
-                  >
-                    <option value=''>全部书源</option>
-                    {sources.map((source) => (
-                      <option key={source.id} value={source.id}>
-                        {source.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <div className='flex items-end'>
-                  <button
-                    type='submit'
-                    disabled={loading}
-                    className='inline-flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-6 text-sm font-bold text-white shadow-lg shadow-emerald-600/20 transition-colors duration-200 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70 dark:focus:ring-offset-gray-950 lg:w-auto'
-                  >
-                    {loading ? (
-                      <Loader2 className='h-4 w-4 animate-spin' />
-                    ) : (
-                      <Search className='h-4 w-4' />
-                    )}
-                    {loading ? '搜索中' : '搜索'}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
+              <Search className='h-3.5 w-3.5' />
+              {keyword}
+            </button>
+          ))}
         </div>
+
+        <form onSubmit={handleSubmit} className='mt-5'>
+          <div className='grid gap-3 lg:grid-cols-[1fr_13rem_auto]'>
+            <label className='block'>
+              <span
+                className={cn('mb-2 block text-xs font-medium', LIBRARY_MUTED)}
+              >
+                关键词
+              </span>
+              <div className='relative'>
+                <Search
+                  className={cn(
+                    'pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2',
+                    LIBRARY_MUTED
+                  )}
+                />
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder='搜索书名 / 作者'
+                  aria-label='搜索书名或作者'
+                  className={`${FIELD_CLASS} pl-11 pr-11`}
+                />
+                {q ? (
+                  <button
+                    type='button'
+                    onClick={() => setQ('')}
+                    className={cn(
+                      'absolute right-2.5 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full text-library-muted transition-colors duration-200 hover:bg-library-ochre-tint hover:text-library-ochre dark:text-library-night-muted dark:hover:bg-library-night-ochre-tint dark:hover:text-library-night-ochre',
+                      LIBRARY_FOCUS
+                    )}
+                    aria-label='清空搜索关键词'
+                  >
+                    <X className='h-4 w-4' />
+                  </button>
+                ) : null}
+              </div>
+            </label>
+
+            <label className='block'>
+              <span
+                className={cn('mb-2 block text-xs font-medium', LIBRARY_MUTED)}
+              >
+                书源
+              </span>
+              <select
+                value={sourceId}
+                onChange={(e) => setSourceId(e.target.value)}
+                aria-label='选择书源'
+                className={`${FIELD_CLASS} cursor-pointer`}
+              >
+                <option value=''>全部书源</option>
+                {sources.map((source) => (
+                  <option key={source.id} value={source.id}>
+                    {source.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className='flex items-end'>
+              <button
+                type='submit'
+                disabled={loading}
+                className={cn(
+                  LIBRARY_BUTTON,
+                  'h-12 w-full cursor-pointer px-6 disabled:cursor-not-allowed disabled:opacity-70 lg:w-auto'
+                )}
+              >
+                {loading ? (
+                  <Loader2 className='h-4 w-4 animate-spin' />
+                ) : (
+                  <Search className='h-4 w-4' />
+                )}
+                {loading ? '搜索中' : '搜索'}
+              </button>
+            </div>
+          </div>
+        </form>
       </section>
 
-      <section className='rounded-[2rem] border border-emerald-100/80 bg-white/75 p-4 shadow-sm shadow-emerald-950/5 backdrop-blur dark:border-emerald-500/10 dark:bg-gray-950/60 sm:p-5'>
-        <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
-          <div className='min-w-0'>
-            <div className='flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-300'>
-              <BookMarked className='h-4 w-4' />
-              Results
-            </div>
-            <h2 className='mt-1 text-2xl font-black tracking-tight text-slate-950 dark:text-white'>
-              {hasSearched
-                ? `搜索结果${
-                    result.results.length > 0
-                      ? `（${result.results.length}）`
-                      : ''
-                  }`
-                : '等待搜索'}
-            </h2>
-            <p className='mt-1 text-sm text-slate-500 dark:text-slate-400'>
-              当前范围：{selectedSourceName}
-            </p>
-          </div>
-
-          <div className='flex flex-wrap items-center gap-2'>
-            <span className='inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200'>
-              <Layers3 className='h-3.5 w-3.5' />
-              {sources.length || 0} 个书源
-            </span>
-            {loading && useFluidSearch && totalSources > 0 ? (
-              <span className='inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-200'>
-                <Loader2 className='h-3.5 w-3.5 animate-spin' />
+      <section className='space-y-4'>
+        <MediaSectionHeader
+          title={
+            hasSearched
+              ? `搜索结果${
+                  result.results.length > 0
+                    ? `（${result.results.length}）`
+                    : ''
+                }`
+              : '等待搜索'
+          }
+          subtitle={hasSearched ? `当前范围：${scopeLabel}` : undefined}
+          action={
+            loading && useFluidSearch && totalSources > 0 ? (
+              <span className={cn('shrink-0 text-xs', LIBRARY_MUTED)}>
                 搜索中 {completedSources}/{totalSources}
               </span>
-            ) : null}
-          </div>
-        </div>
+            ) : undefined
+          }
+        />
+
         {loading && useFluidSearch && totalSources > 0 ? (
-          <div className='mt-4 h-2 overflow-hidden rounded-full bg-emerald-50 dark:bg-gray-900'>
+          <div className={cn(LIBRARY_PROGRESS_TRACK, 'h-1.5')}>
             <div
-              className='h-full rounded-full bg-emerald-600 transition-all duration-300'
+              className={LIBRARY_PROGRESS_BAR}
               style={{ width: `${searchProgress}%` }}
             />
           </div>
         ) : null}
-      </section>
 
-      {loading && result.results.length === 0 ? <SearchSkeleton /> : null}
-      {error ? (
-        <div className='rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-950/20 dark:text-red-300'>
-          {error}
-        </div>
-      ) : null}
-      <section className='grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-6'>
-        {result.results.map((item) => (
-          <BookCard
-            key={`${item.sourceId}-${item.id}`}
-            item={item}
-            href={detailHref(item)}
-            onNavigate={() => cacheBookListItem(item)}
-          />
-        ))}
-      </section>
-      {!loading && hasSearched && !error && result.results.length === 0 ? (
-        <div className='rounded-[2rem] border border-dashed border-emerald-200 bg-white/75 p-8 text-center shadow-sm dark:border-emerald-500/20 dark:bg-gray-950/50'>
-          <div className='mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-200'>
-            <Search className='h-6 w-6' />
-          </div>
-          <h3 className='mt-4 text-lg font-bold text-slate-950 dark:text-white'>
-            没有找到匹配书籍
-          </h3>
-          <p className='mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400'>
-            试试更短的关键词、作者名，或切换到全部书源重新搜索。
-          </p>
-          <div className='mt-5 flex flex-wrap justify-center gap-2'>
-            {QUICK_SEARCHES.map((keyword) => (
+        {loading && result.results.length === 0 ? (
+          <MediaGridSkeleton count={12} />
+        ) : null}
+        {error ? <EmptyState tone='error' description={error} /> : null}
+
+        {result.results.length > 0 ? (
+          <MediaGrid>
+            {result.results.map((item) => (
+              <MediaCard
+                key={`${item.sourceId}-${item.id}`}
+                item={bookCardItem(item)}
+                href={detailHref(item)}
+                onNavigate={() => cacheBookListItem(item)}
+              />
+            ))}
+          </MediaGrid>
+        ) : null}
+
+        {!loading && hasSearched && !error && result.results.length === 0 ? (
+          <EmptyState
+            icon={<Search className='h-7 w-7' />}
+            title='没有找到匹配书籍'
+            description='试试更短的关键词、作者名，或切换到全部书源重新搜索。'
+            action={QUICK_SEARCHES.map((keyword) => (
               <button
                 key={keyword}
                 type='button'
@@ -667,14 +673,14 @@ export default function BooksSearchPage() {
                   setQ(keyword);
                   submitSearch(keyword);
                 }}
-                className='cursor-pointer rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-800 transition-colors duration-200 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 dark:border-emerald-500/20 dark:bg-gray-950 dark:text-emerald-100 dark:hover:bg-emerald-500/10'
+                className={CHIP_CLASS}
               >
                 搜索 {keyword}
               </button>
             ))}
-          </div>
-        </div>
-      ) : null}
+          />
+        ) : null}
+      </section>
     </div>
   );
 }
