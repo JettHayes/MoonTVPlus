@@ -73,6 +73,10 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # 默认会装已下架的 'tools' 包，导致 sdkmanager 报 "Failed to find package 'tools'"
+          # 这里只装 platform-tools，去掉过时的 tools
+          packages: 'platform-tools'
 
       - name: Install Android SDK packages
         run: |
