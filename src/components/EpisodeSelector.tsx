@@ -24,7 +24,8 @@ import { isEpisodeHiddenByFilter } from '@/lib/episode-filter';
 import { loadAllLocalEpisodeProgressRecords } from '@/lib/episode-progress';
 import { isNetdiskSource } from '@/lib/netdisk/source';
 import { EpisodeFilterConfig,SearchResult } from '@/lib/types';
-import { getVideoResolutionFromM3u8 } from '@/lib/utils';
+import { getVideoResolutionFromM3u8, SpeedTestError } from '@/lib/utils';
+import type { SpeedTestErrorType } from '@/lib/utils';
 
 import DanmakuPanel from '@/components/DanmakuPanel';
 import EpisodeFilterSettings from '@/components/EpisodeFilterSettings';
@@ -249,6 +250,7 @@ interface VideoInfo {
   pingTime: number;
   bitrate: string; // 视频码率
   hasError?: boolean; // 添加错误状态标识
+  errorType?: SpeedTestErrorType; // 失败类型：超时 / 无法访问
 }
 
 interface EpisodeSelectorProps {
@@ -679,7 +681,9 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
       const info = await getVideoResolutionFromM3u8(episodeUrl, speedTestTimeout);
       setVideoInfoMap((prev) => new Map(prev).set(sourceKey, info));
     } catch (error) {
-      // 失败时保存错误状态
+      // 失败时保存错误状态，并区分超时与无法访问
+      const errorType: SpeedTestErrorType =
+        error instanceof SpeedTestError ? error.type : 'unreachable';
       setVideoInfoMap((prev) =>
         new Map(prev).set(sourceKey, {
           quality: '错误',
@@ -687,6 +691,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
           pingTime: 0,
           bitrate: '未知',
           hasError: true,
+          errorType,
         })
       );
     }
@@ -1433,7 +1438,9 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                                 if (videoInfo.hasError) {
                                   return (
                                     <div className='bg-gray-500/10 dark:bg-gray-400/20 text-red-600 dark:text-red-400 px-1.5 py-0 rounded text-xs flex-shrink-0 min-w-[50px] text-center'>
-                                      检测失败
+                                      {videoInfo.errorType === 'timeout'
+                                        ? '超时'
+                                        : '无法访问'}
                                     </div>
                                   );
                                 } else {
@@ -1506,7 +1513,9 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                                   } else {
                                     return (
                                       <div className='text-red-500/90 dark:text-red-400 font-medium text-xs'>
-                                        无测速数据
+                                        {videoInfo.errorType === 'timeout'
+                                          ? '测速超时'
+                                          : '源无法访问'}
                                       </div>
                                     );
                                   }

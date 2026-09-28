@@ -684,6 +684,22 @@ export function processVideoUrl(originalUrl: string): string {
 }
 
 /**
+ * 测速失败类型：
+ * - timeout：源可达但在超时窗口内没能拿到元数据/首片（太慢）
+ * - unreachable：网络错误、CORS、404、HLS 解析失败等，源无法访问
+ */
+export type SpeedTestErrorType = 'timeout' | 'unreachable';
+
+export class SpeedTestError extends Error {
+  type: SpeedTestErrorType;
+  constructor(type: SpeedTestErrorType, message: string) {
+    super(message);
+    this.name = 'SpeedTestError';
+    this.type = type;
+  }
+}
+
+/**
  * 从m3u8地址获取视频质量等级和网络信息
  * @param m3u8Url m3u8播放列表的URL
  * @returns Promise<{quality: string, loadSpeed: string, pingTime: number, bitrate: string}> 视频质量等级和网络信息
@@ -770,7 +786,9 @@ export async function getVideoResolutionFromM3u8(
         } else {
           hls.destroy();
           video.remove();
-          reject(new Error('Timeout loading video metadata'));
+          reject(
+            new SpeedTestError('timeout', 'Timeout loading video metadata')
+          );
         }
       }, timeoutMs);
 
@@ -778,7 +796,9 @@ export async function getVideoResolutionFromM3u8(
         clearTimeout(timeout);
         hls.destroy();
         video.remove();
-        reject(new Error('Failed to load video metadata'));
+        reject(
+          new SpeedTestError('unreachable', 'Failed to load video metadata')
+        );
       };
 
       let fragmentStartTime = 0;
@@ -887,7 +907,17 @@ export async function getVideoResolutionFromM3u8(
           clearTimeout(timeout);
           hls.destroy();
           video.remove();
-          reject(new Error(`HLS播放失败: ${data.type}`));
+          // HLS 的 *TimeOut 类 details（manifestLoadTimeOut 等）归为超时，
+          // 其余致命错误（网络不可达、404、解析失败）归为无法访问
+          const details =
+            typeof data.details === 'string' ? data.details : '';
+          const isTimeout = details.toLowerCase().includes('timeout');
+          reject(
+            new SpeedTestError(
+              isTimeout ? 'timeout' : 'unreachable',
+              `HLS播放失败: ${data.type}`
+            )
+          );
         }
       });
 

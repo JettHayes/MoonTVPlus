@@ -995,6 +995,10 @@ export abstract class BaseRedisStorage implements IStorage {
 
   // 检查用户是否存在
   async checkUserExist(userName: string): Promise<boolean> {
+    // 站长（owner）凭据来自环境变量，不落库，需显式放行
+    if (userName === process.env.USERNAME) {
+      return true;
+    }
     // 使用 EXISTS 判断 key 是否存在
     const exists = await this.withRetry(() =>
       this.adapter.exists(this.userPwdKey(userName))
