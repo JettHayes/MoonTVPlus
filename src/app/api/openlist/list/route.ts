@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
     const pageSize = parseInt(searchParams.get('pageSize') || '20');
-    const includeFailed = searchParams.get('includeFailed') === 'true';
+    const includeFailed = searchParams.get('includeFailed') !== 'false';
     const noCache = searchParams.get('noCache') === 'true';
     const categoryFilter = (searchParams.get('category') || '').trim();
 
