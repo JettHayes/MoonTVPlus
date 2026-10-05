@@ -101,7 +101,19 @@ export interface LxServerSong {
   pic?: string;
   cover?: string;
   songmid?: string;
+  hash?: string;
+  copyrightId?: string;
+  albumId?: string;
+  lrcUrl?: string;
+  mrcUrl?: string;
+  trcUrl?: string;
   meta?: {
+    hash?: string;
+    copyrightId?: string;
+    albumId?: string;
+    lrcUrl?: string;
+    mrcUrl?: string;
+    trcUrl?: string;
     picUrl?: string;
     albumName?: string;
   };
@@ -267,6 +279,12 @@ export function normalizeLxSong(song: LxServerSong): MusicV2Song {
       song.album?.pic ||
       song.al?.picUrl,
     durationText: song.interval,
+    hash: song.hash || song.meta?.hash,
+    copyrightId: song.copyrightId || song.meta?.copyrightId,
+    albumId: song.albumId || song.meta?.albumId,
+    lrcUrl: song.lrcUrl || song.meta?.lrcUrl,
+    mrcUrl: song.mrcUrl || song.meta?.mrcUrl,
+    trcUrl: song.trcUrl || song.meta?.trcUrl,
   });
 }
 
@@ -318,15 +336,15 @@ async function lxFetch(path: string, init: RequestInit = {}, authMode: LxFetchAu
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers,
-    signal: AbortSignal.timeout(45000),
+    signal: init.signal || AbortSignal.timeout(45000),
     cache: 'no-store',
   });
 
   return response;
 }
 
-export async function lxGetJson<T>(path: string, authMode: LxFetchAuthMode = 'auto'): Promise<T> {
-  const response = await lxFetch(path, {}, authMode);
+export async function lxGetJson<T>(path: string, authMode: LxFetchAuthMode = 'auto', signal?: AbortSignal): Promise<T> {
+  const response = await lxFetch(path, { signal }, authMode);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(text || `请求失败(${response.status})`);
@@ -334,10 +352,11 @@ export async function lxGetJson<T>(path: string, authMode: LxFetchAuthMode = 'au
   return response.json() as Promise<T>;
 }
 
-export async function lxPostJson<T>(path: string, body: any, authMode: LxFetchAuthMode = 'auto'): Promise<T> {
+export async function lxPostJson<T>(path: string, body: any, authMode: LxFetchAuthMode = 'auto', signal?: AbortSignal): Promise<T> {
   const response = await lxFetch(path, {
     method: 'POST',
     body: JSON.stringify(body),
+    signal,
   }, authMode);
   if (!response.ok) {
     const text = await response.text();
@@ -408,4 +427,44 @@ export async function fetchLxLyric(song: MusicV2Song) {
 
     return normalizeLyricPayload(payload);
   }
+}
+
+export async function getLxPlaybackSongInfo(song: MusicV2Song) {
+  const songmid = extractSongmid(song);
+  const fallback = {
+    id: song.songId,
+    source: song.source,
+    songmid,
+    name: song.name,
+    singer: song.artist,
+    interval: song.durationText,
+    hash: song.hash,
+    copyrightId: song.copyrightId,
+    albumId: song.albumId,
+    lrcUrl: song.lrcUrl,
+    mrcUrl: song.mrcUrl,
+    trcUrl: song.trcUrl,
+  };
+  if (!song.name) return fallback;
+
+  // Restore platform metadata missing from legacy queues without changing songs.
+  try {
+    const query = new URLSearchParams({
+      name: song.name + ' ' + song.artist,
+      source: song.source,
+    });
+    const payload = await lxGetJson<unknown>(
+      '/api/music/search?' + query.toString(), 'none', AbortSignal.timeout(5000)
+    );
+    const match = unwrapLxArray<Record<string, unknown>>(payload).find(item => {
+      const meta = item.meta as Record<string, unknown> | undefined;
+      return [item.songmid, meta?.songmid, item.id, item.songId].some(value =>
+        String(value || '').replace(new RegExp('^' + song.source + '_'), '') === songmid
+      );
+    });
+    if (match) return { ...fallback, ...match, source: song.source, songmid };
+  } catch {
+    // Existing IDs remain usable when search is unavailable.
+  }
+  return fallback;
 }
