@@ -17,12 +17,13 @@ export async function GET(request: NextRequest) {
   const embyKey = searchParams.get('embyKey') || undefined;
   const sortBy = searchParams.get('sortBy') || 'SortName';
   const sortOrder = searchParams.get('sortOrder') || 'Ascending';
+  const keyword = (searchParams.get('q') || '').trim();
 
   try {
     const authResult = await requireFeaturePermission(request, 'emby', '无权限访问 Emby');
     if (authResult instanceof NextResponse) return authResult;
     // 判断是否是默认排序（只有默认排序才使用缓存）
-    const isDefaultSort = sortBy === 'SortName' && sortOrder === 'Ascending';
+    const isDefaultSort = !keyword && sortBy === 'SortName' && sortOrder === 'Ascending';
 
     // 只有默认排序才检查缓存
     if (isDefaultSort) {
@@ -41,6 +42,7 @@ export async function GET(request: NextRequest) {
     // 获取媒体列表
     const result = await client.getItems({
       ParentId: parentId,
+      searchTerm: keyword || undefined,
       IncludeItemTypes: 'Movie,Series',
       Recursive: true,
       Fields: 'Overview,ProductionYear',
