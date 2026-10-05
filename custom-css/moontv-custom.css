@@ -1,7 +1,310 @@
-/*
- * MoonTVPlus 自定义主题 CSS 备份
- *
- * 此文件仅用于保存自定义 CSS 备份，不会被项目自动加载。
- * 如需让部署站点生效，请将内容复制到管理后台的“自定义 CSS”配置中。
- */
+/* 01 · 深浅配色；调整本段即可改变主题浓度 */
+html[data-moontvplus] {
+  --ptv-accent: #007c76;
+  --ptv-action: #00d2be;
+  --ptv-action-ink: #062421;
+  --ptv-text: #192d30;
+  --ptv-muted: #53676b;
+  --ptv-page: #edf2f1;
+  --ptv-panel: #f4f7f6;
+  --ptv-surface: rgba(247, 250, 249, .94);
+  --ptv-soft: #e5edeb;
+  --ptv-line: rgba(39, 77, 77, .18);
+  --ptv-selected: rgba(0, 124, 118, .12);
+  --ptv-wallpaper-overlay: rgba(237, 242, 241, .76);
+  --ptv-shadow: 0 16px 40px rgba(10, 34, 36, .09);
+  --ptv-gutter: clamp(16px, 3vw, 40px);
+  --ptv-max: 1360px;
+  --theme-primary: var(--ptv-accent);
+  --theme-primary-hover: #006b66;
+  --skeleton-color: #dbe6e3;
+  --skeleton-highlight: #edf3f0;
+}
+html[data-moontvplus].dark {
+  --ptv-accent: #00d2be;
+  --ptv-text: #edf4f2;
+  --ptv-muted: #a2b5b5;
+  --ptv-page: #091214;
+  --ptv-panel: #102023;
+  --ptv-surface: rgba(14, 29, 32, .94);
+  --ptv-soft: #193035;
+  --ptv-line: rgba(177, 216, 214, .16);
+  --ptv-selected: rgba(0, 210, 190, .12);
+  --ptv-wallpaper-overlay: rgba(6, 17, 20, .75);
+  --ptv-shadow: 0 16px 40px rgba(0, 0, 0, .25);
+  --theme-primary-hover: #36e5d3;
+  --skeleton-color: #1a3034;
+  --skeleton-highlight: #284146;
+}
+html[data-moontvplus] body {
+  background-color: var(--ptv-page) !important;
+  color: var(--ptv-text) !important;
+}
+html[data-moontvplus] ::selection { background: var(--ptv-action); color: var(--ptv-action-ink); }
+html[data-moontvplus] :is(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid var(--ptv-accent) !important;
+  outline-offset: 3px;
+}
 
+/* 已配置的 PageLayout 壁纸：仅调整可见度与遮罩，不更改图片 */
+html[data-moontvplus] .relative.w-full.min-h-screen.overflow-hidden > div.bg-cover.bg-center.bg-no-repeat.pointer-events-none {
+  opacity: .7 !important;
+}
+html[data-moontvplus] .relative.w-full.min-h-screen.overflow-hidden > div.bg-cover.bg-center.bg-no-repeat.pointer-events-none + div.pointer-events-none {
+  background: var(--ptv-wallpaper-overlay) !important;
+}
+
+/* 02 · 共用文字、面板与控件；不覆盖播放器的黑底、海报上的白字及警告色 */
+html[data-moontvplus] :is(.text-gray-900, .text-gray-800, .text-gray-700, .dark\:text-gray-100, .dark\:text-gray-200, .dark\:text-gray-300) {
+  color: var(--ptv-text) !important;
+}
+html[data-moontvplus] :is(.text-gray-600, .text-gray-500, .dark\:text-gray-400, .dark\:text-gray-500) {
+  color: var(--ptv-muted) !important;
+}
+html[data-moontvplus] :is(.text-green-500, .text-green-600, .text-green-700, .dark\:text-green-400, .text-blue-600, .dark\:text-blue-400) {
+  color: var(--ptv-accent) !important;
+}
+html[data-moontvplus] :is(.bg-white, .bg-gray-50, .dark\:bg-gray-800, .dark\:bg-gray-900) {
+  background-color: var(--ptv-surface) !important;
+}
+html[data-moontvplus] :is(.bg-gray-100, .bg-gray-200, .dark\:bg-gray-700) {
+  background-color: var(--ptv-soft) !important;
+}
+html[data-moontvplus] :is(.border-gray-200, .border-gray-300, .dark\:border-gray-600, .dark\:border-gray-700) {
+  border-color: var(--ptv-line) !important;
+}
+html[data-moontvplus] :is(button, a):is(.bg-green-500, .bg-green-600, .bg-blue-500, .bg-blue-600) {
+  background-color: var(--ptv-action) !important;
+  color: var(--ptv-action-ink) !important;
+  border-color: transparent !important;
+  box-shadow: none;
+}
+html[data-moontvplus] :is(button, a):is(.bg-green-500, .bg-green-600, .bg-blue-500, .bg-blue-600):hover {
+  background-color: #45e2d1 !important;
+}
+html[data-moontvplus] :is(button, a):is(.bg-green-500, .bg-green-600, .bg-blue-500, .bg-blue-600):disabled { opacity: .45; }
+html[data-moontvplus] :is(.hover\:bg-gray-100, .hover\:bg-gray-200):hover {
+  background-color: var(--ptv-selected) !important;
+}
+html[data-moontvplus] :is(input[type="text"], input[type="password"], input[type="number"], input[type="url"], input[type="email"], textarea, select) {
+  background-color: var(--ptv-panel) !important;
+  color: var(--ptv-text) !important;
+  border-color: var(--ptv-line) !important;
+  accent-color: var(--ptv-accent);
+}
+html[data-moontvplus] :is(input, textarea)::placeholder { color: var(--ptv-muted) !important; opacity: .8; }
+html[data-moontvplus] :is(input, textarea, select):focus {
+  border-color: var(--ptv-accent) !important;
+  box-shadow: 0 0 0 3px var(--ptv-selected) !important;
+}
+html[data-moontvplus] :is(input[type="checkbox"], input[type="radio"]) { accent-color: var(--ptv-accent); }
+html[data-moontvplus] #searchInput { min-height: 48px; border-radius: 14px; box-shadow: none; }
+
+/* 03 · 桌面侧栏与手机导航：保留项目的侧栏展开宽度及安全区 */
+html[data-moontvplus] [data-sidebar] {
+  background: var(--ptv-surface) !important;
+  border-color: var(--ptv-line) !important;
+  box-shadow: none !important;
+}
+html[data-moontvplus] [data-sidebar] a[href="/"] { color: var(--ptv-accent) !important; letter-spacing: -.04em; }
+html[data-moontvplus] [data-sidebar] a[data-active] { min-height: 46px; border-radius: 10px; }
+html[data-moontvplus] [data-sidebar] a[data-active]:hover { background: var(--ptv-selected) !important; color: var(--ptv-accent) !important; }
+html[data-moontvplus] [data-sidebar] a[data-active="true"] {
+  background: var(--ptv-selected) !important;
+  color: var(--ptv-accent) !important;
+  box-shadow: inset 3px 0 var(--ptv-accent);
+}
+html[data-moontvplus] :is(header.md\:hidden, nav.md\:hidden.fixed) {
+  background: var(--ptv-surface) !important;
+  border-color: var(--ptv-line) !important;
+  box-shadow: none !important;
+}
+html[data-moontvplus] header.md\:hidden a[href="/"] { color: var(--ptv-accent) !important; font-size: clamp(17px, 5vw, 22px); }
+html[data-moontvplus] header.md\:hidden > div.relative > div.absolute {
+  left: 60px !important; right: 104px !important; transform: translateY(-50%) !important;
+  text-align: center; white-space: nowrap;
+}
+html[data-moontvplus] :is(button[aria-label="Toggle theme"], button[aria-label="User Menu"], header.md\:hidden a[href="/search"]) {
+  width: 44px; height: 44px;
+  color: var(--ptv-muted) !important;
+}
+
+/* 04 · 首页内容宽度：轮播和影片架对齐，不影响搜索、播放等页面 */
+html[data-moontvplus] main:has(div.group > button[aria-label="上一张"]) > div.w-full.mb-4 {
+  padding-inline: var(--ptv-gutter);
+  margin-block: 24px 32px;
+}
+html[data-moontvplus] main:has(div.group > button[aria-label="上一张"]) > div.px-2 {
+  padding-inline: var(--ptv-gutter) !important;
+}
+html[data-moontvplus] main:has(div.group > button[aria-label="上一张"]) > div.px-2 > div.mx-auto {
+  width: 100%; max-width: var(--ptv-max) !important;
+}
+html[data-moontvplus] main:has(div.group > button[aria-label="上一张"]) h2.text-xl {
+  color: var(--ptv-text) !important; font-size: clamp(18px, 1.5vw, 23px); letter-spacing: -.025em;
+}
+html[data-moontvplus] main:has(div.group > button[aria-label="上一张"]) div.mb-8 { margin-bottom: 30px; }
+
+/* 05 · 首页轮播：通过真实 aria-label 定位，避免误伤其他 .group */
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) {
+  width: 100%; max-width: var(--ptv-max); height: clamp(380px, 33vw, 450px);
+  margin-inline: auto;
+  background: var(--ptv-panel);
+  border: 1px solid var(--ptv-line);
+  border-radius: 24px;
+  box-shadow: var(--ptv-shadow);
+  isolation: isolate;
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"])::before {
+  content: ""; position: absolute; left: 0; top: 28px; bottom: 28px; width: 3px;
+  background: var(--ptv-accent); z-index: 1;
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div.absolute.inset-0:not(.pointer-events-none) {
+  inset: 20px 24px 68px auto !important;
+  width: 40%;
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div.absolute.inset-0:not(.pointer-events-none) img {
+  object-fit: contain !important;
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, .2));
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div.absolute.inset-0:not(.pointer-events-none) div.bg-gradient-to-r,
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div.absolute.inset-0:not(.pointer-events-none) div.bg-gradient-to-t { display: none !important; }
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div.pointer-events-none {
+  inset: 0 42% 0 0 !important;
+  align-items: center !important;
+  padding: clamp(24px, 3vw, 48px) !important;
+  padding-bottom: 72px !important;
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div.pointer-events-none > div {
+  display: flex; flex-direction: column; gap: 16px; min-width: 0; width: 100%;
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div.pointer-events-none > div > * { margin-block: 0 !important; }
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) h2 {
+  color: var(--ptv-text) !important;
+  font-size: clamp(28px, 3vw, 44px) !important; line-height: 1.22; letter-spacing: -.045em;
+  overflow-wrap: anywhere; filter: none !important;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) h2 + div { color: var(--ptv-muted) !important; font-size: 13px; gap: 8px; }
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) h2 + div > span.rounded {
+  background: var(--ptv-soft) !important; color: var(--ptv-muted) !important;
+  border: 1px solid var(--ptv-line); padding: 3px 8px; font-size: 12px;
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) h2 + div > span.bg-yellow-500 {
+  background: var(--ptv-selected) !important; color: var(--ptv-accent) !important; font-variant-numeric: tabular-nums;
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) p {
+  order: 2; color: var(--ptv-muted) !important; font-size: 14px; line-height: 1.8;
+  -webkit-line-clamp: 3; filter: none !important;
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div.pointer-events-none button {
+  order: 3; display: inline-flex !important; align-self: flex-start;
+  min-height: 46px; padding: 11px 22px; border-radius: 10px;
+  background: var(--ptv-action) !important; color: var(--ptv-action-ink) !important;
+  font-size: 14px; font-weight: 700;
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div.pointer-events-none button svg { fill: currentColor !important; }
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div.pointer-events-none button:hover { background: #45e2d1 !important; }
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > button[aria-label] {
+  opacity: 1 !important; top: auto !important; bottom: 18px !important;
+  transform: none !important; width: 44px; height: 44px;
+  background: var(--ptv-soft) !important; color: var(--ptv-text) !important;
+  border: 1px solid var(--ptv-line); border-radius: 10px;
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > button[aria-label="上一张"] { left: auto !important; right: 74px !important; }
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > button[aria-label="下一张"] { right: 24px !important; }
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > button[aria-label]:hover { background: var(--ptv-selected) !important; color: var(--ptv-accent) !important; }
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > button[aria-label] svg { width: 20px; height: 20px; }
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div:has(> button[aria-label^="跳转到第"]) {
+  left: 40px !important; bottom: 18px !important; transform: none !important; gap: 4px;
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) button[aria-label^="跳转到第"] {
+  position: relative; width: 32px !important; height: 44px !important; background: transparent !important;
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) button[aria-label^="跳转到第"]::after {
+  content: ""; position: absolute; left: 4px; right: 4px; top: 20px; height: 3px;
+  border-radius: 2px; background: var(--ptv-line);
+}
+html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) button[aria-label^="跳转到第"].w-8::after { background: var(--ptv-accent); }
+
+/* 06 · 海报架：只匹配 VideoCard 的真实根节点，保留评分、进度与操作层 */
+html[data-moontvplus] main .group.relative.w-full.bg-transparent > div.relative.rounded-lg > div.overflow-hidden {
+  border-radius: 12px !important;
+  background-color: var(--ptv-soft);
+  outline: 1px solid var(--ptv-line);
+  outline-offset: -1px;
+}
+html[data-moontvplus] main .group.relative.w-full.bg-transparent > div.mt-2 { margin-top: 10px; text-align: left; }
+html[data-moontvplus] main .group.relative.w-full.bg-transparent > div.mt-2 span.truncate {
+  color: var(--ptv-text) !important; font-size: 14px; font-weight: 600;
+}
+html[data-moontvplus] main .group.relative.w-full.bg-transparent:hover > div.mt-2 span.truncate { color: var(--ptv-accent) !important; }
+html[data-moontvplus] main .group.relative.w-full.bg-transparent div.h-1 > div.h-full.bg-white { background: var(--ptv-action) !important; }
+html[data-moontvplus] main .flex.overflow-x-auto > div:has(> .group.relative.w-full.bg-transparent > div[class~="aspect-[2/3]"]) {
+  width: clamp(116px, 12vw, 176px) !important;
+  min-width: clamp(116px, 12vw, 176px) !important;
+}
+html[data-moontvplus] main .flex.overflow-x-auto:has(> div > .group.relative.w-full.bg-transparent) {
+  gap: clamp(12px, 1.3vw, 20px) !important;
+  padding-inline: 2px !important;
+  padding-bottom: 24px !important;
+}
+html[data-moontvplus] main .flex.overflow-x-auto:has(> div > .group.relative.w-full.bg-transparent) > div { margin-left: 0 !important; }
+@media (hover: hover) and (pointer: fine) {
+  html[data-moontvplus] main .group.relative.w-full.bg-transparent:hover { transform: translateY(-3px) !important; }
+}
+
+/* 07 · 管理面板、登录与注册；保留校验、禁用状态和原有手机管理导航 */
+html[data-moontvplus] main div.bg-white.rounded-lg.p-6.border {
+  background: var(--ptv-surface) !important; border-color: var(--ptv-line) !important;
+  border-radius: 16px; box-shadow: none;
+}
+html[data-moontvplus] main nav.w-56 button { min-height: 44px; }
+html[data-moontvplus] main nav.w-56 button.bg-green-500\/10 {
+  background: var(--ptv-selected) !important; color: var(--ptv-accent) !important;
+}
+html[data-moontvplus] .max-w-md:has(> form) {
+  background: var(--ptv-surface) !important;
+  border: 1px solid var(--ptv-line) !important;
+  border-radius: 24px; box-shadow: var(--ptv-shadow);
+  padding: clamp(24px, 5vw, 40px);
+}
+html[data-moontvplus] .relative.min-h-screen.flex.items-center.justify-center.px-4.overflow-hidden:has(> .max-w-md > form)::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: var(--ptv-wallpaper-overlay);
+}
+html[data-moontvplus] .max-w-md:has(> form) h1 { color: var(--ptv-accent) !important; letter-spacing: -.04em; filter: none; }
+html[data-moontvplus] .max-w-md:has(> form) :is(input, button[type="submit"]) { min-height: 48px; border-radius: 10px; }
+html[data-moontvplus] .max-w-md:has(> form) button[type="submit"] { background: var(--ptv-action) !important; color: var(--ptv-action-ink) !important; }
+
+/* 08 · 手机与窄屏；原有滑动切换保留，左右箭头仍只在桌面显示 */
+@media (max-width: 1100px) {
+  html[data-moontvplus] main:has(div.group > button[aria-label="上一张"]) > div.w-full.mb-4 { margin-block: 16px 26px; }
+  html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) {
+    display: flex; flex-direction: column; height: auto !important; border-radius: 18px;
+  }
+  html[data-moontvplus] main div.group:has(> button[aria-label="上一张"])::before { top: 0; bottom: auto; left: 22px; right: 22px; width: auto; height: 2px; }
+  html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div.absolute.inset-0:not(.pointer-events-none) {
+    position: relative !important; inset: auto !important; width: 100% !important;
+    height: clamp(200px, 55vw, 280px); margin-top: 18px; flex: none;
+  }
+  html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div.pointer-events-none {
+    position: relative !important; inset: auto !important; padding: 22px !important; padding-bottom: 64px !important;
+  }
+  html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div.pointer-events-none > div { gap: 12px; }
+  html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) h2 { font-size: clamp(25px, 6.5vw, 32px) !important; }
+  html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) p { -webkit-line-clamp: 2; font-size: 13px; }
+  html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > div:has(> button[aria-label^="跳转到第"]) { left: 18px !important; bottom: 8px !important; }
+}
+@media (max-width: 767px) {
+  html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) > button[aria-label] { display: none !important; }
+  html[data-moontvplus] main .group.relative.w-full.bg-transparent:hover { transform: none !important; }
+  html[data-moontvplus] main div.bg-white.rounded-lg.p-6.border { padding: 20px; }
+  html[data-moontvplus] :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]) { font-size: 16px !important; }
+  html[data-moontvplus] textarea.font-mono { font-size: 13px !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-moontvplus] main div.group:has(> button[aria-label="上一张"]) .transition-opacity,
+  html[data-moontvplus] main .group.relative.w-full.bg-transparent,
+  html[data-moontvplus] [data-sidebar] { transition-duration: .01ms !important; }
+}
