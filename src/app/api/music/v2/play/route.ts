@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { extractSongmid, fetchLxLyric, MusicQuality, normalizeMusicQuality, normalizeSong, lxPostJson } from '@/lib/music-v2';
+import { extractSongmid, fetchLxLyric, getLxPlaybackSongInfo, lxPostJson,MusicQuality, normalizeMusicQuality, normalizeSong } from '@/lib/music-v2';
 import { badRequest, internalError } from '@/lib/music-v2-api';
+import { LxStreamCandidate, MusicStreamFailure, openMusicStream } from '@/lib/music-v2-stream';
 
 export const runtime = 'nodejs';
 
@@ -109,36 +110,24 @@ export async function POST(request: NextRequest) {
     let attempts = cachedMeta.meta.attempts || [];
 
     if (includeUrl) {
-      const urlResult = await lxPostJson<{ url?: string; type?: string; attempts?: any[]; error?: string }>(
-        '/api/music/url',
-        {
-          songInfo: {
-            id: song.songId,
-            name: song.name,
-            singer: song.artist,
-            source: song.source,
-            songmid: song.songmid || song.songId.split('_').slice(1).join('_'),
-          },
-          quality,
-        },
-        'auto'
-      );
-
-      if (!urlResult?.url) {
-        return NextResponse.json({
-          success: false,
-          error: {
-            code: 'MUSIC_PLAY_FAILED',
-            message: urlResult?.error || '获取播放地址失败',
-          },
-        }, { status: 502 });
-      }
-
-      attempts = urlResult.attempts || attempts;
+      const songInfo = await getLxPlaybackSongInfo(song);
+      const result = await openMusicStream({
+        range: 'bytes=0-4095',
+        signal: request.signal,
+        resolve: (excluded, signal) => lxPostJson<LxStreamCandidate>(
+          '/api/music/url',
+          { songInfo, quality, enableAutoSwitchApiSource: true, excludeApiSources: excluded },
+          'auto',
+          signal
+        ),
+      });
+      // This endpoint only returns metadata; release the validation stream.
+      await result.response.body?.cancel();
+      attempts = result.attempts;
       play = {
         url: buildStableStreamUrl(song, quality),
-        directUrl: urlResult.url,
-        quality: urlResult.type || quality,
+        directUrl: String(result.candidate.url),
+        quality: result.candidate.type || quality,
         requestedQuality,
       };
     }
@@ -159,7 +148,8 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('[music-v2] play route error:', error);
-    return internalError('获取播放信息失败', (error as Error).message);
+    const attempts = error instanceof MusicStreamFailure ? error.attempts : [];
+    console.warn('[music-v2] play route failed:', { attempts });
+    return internalError('获取播放信息失败');
   }
 }
