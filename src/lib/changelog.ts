@@ -11,6 +11,23 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "226.1.0",
+    date: "2026-10-05",
+    added: [
+    "新增快进快退时长配置",
+    "视频源可一键禁用无效源和无法搜索源"
+    ],
+    changed: [
+    "ai评论新版协议支持",
+    "网盘搜索时已配置的网盘分类靠前",
+    "特殊源双向隔离"
+    ],
+    fixed: [
+    "<span style='color:#e11d48'>【高危】</span>修复oidc伪造漏洞",
+    "修复方格进度条搜索样式错误切换成详情样式"
+    ]
+  },
+  {
     version: "226.0.1",
     date: "2026-09-28",
     added: [
@@ -20,7 +37,7 @@ export const changelog: ChangelogEntry[] = [
     "源测速区分超时与无法访问"
     ],
     fixed: [
-    "修复非关系型站长无法云备份"
+    "修复非关系型数据库站长无法云备份"
     ]
   },
   {

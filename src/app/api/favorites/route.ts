@@ -170,6 +170,23 @@ export async function DELETE(request: NextRequest) {
     const username = authInfo.username;
     const { searchParams } = new URL(request.url);
     const key = searchParams.get('key');
+    let keys: string[] | undefined;
+
+    try {
+      const text = await request.text();
+      if (text) {
+        const body = JSON.parse(text);
+        if (Array.isArray(body?.keys)) {
+          keys = Array.from(
+            new Set(
+              body.keys.filter((item: unknown) => typeof item === 'string')
+            )
+          );
+        }
+      }
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
 
     if (key) {
       // 删除单条
@@ -181,6 +198,22 @@ export async function DELETE(request: NextRequest) {
         );
       }
       await db.deleteFavorite(username, source, id);
+    } else if (keys && keys.length > 0) {
+      // 批量删除指定 key（按入口隔离后的可见项）
+      const parsed: Array<[string, string]> = [];
+      for (const item of keys) {
+        const [source, id] = item.split('+');
+        if (!source || !id) {
+          return NextResponse.json(
+            { error: 'Invalid key format' },
+            { status: 400 }
+          );
+        }
+        parsed.push([source, id]);
+      }
+      await Promise.all(
+        parsed.map(([source, id]) => db.deleteFavorite(username, source, id))
+      );
     } else {
       // 清空全部
       const all = await db.getAllFavorites(username);

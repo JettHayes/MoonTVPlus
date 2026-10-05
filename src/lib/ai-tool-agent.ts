@@ -93,8 +93,8 @@ interface ProviderAdapter {
     apiKey: string;
     baseURL: string;
     model: string;
-    maxTokens: number;
-    temperature: number;
+    maxTokens?: number;
+    temperature?: number;
     streaming: boolean;
     signal?: AbortSignal;
     /** Claude 走顶层 system / Responses 走 instructions 时使用 */
@@ -691,11 +691,11 @@ const openaiCompletionsAdapter: ProviderAdapter = {
       messages: opts.transcript,
       tools: opts.tools,
       tool_choice: 'auto',
-      max_tokens: opts.maxTokens,
       stream: opts.streaming,
     };
+    if (opts.maxTokens !== undefined) body.max_tokens = opts.maxTokens;
     // OpenAI 普通协议始终支持 temperature
-    body.temperature = opts.temperature;
+    if (opts.temperature !== undefined) body.temperature = opts.temperature;
 
     const requestUrl = buildProtocolUrl(opts.baseURL, 'chat/completions');
     const res = await fetch(requestUrl, {
@@ -943,10 +943,10 @@ const openaiResponsesAdapter: ProviderAdapter = {
       input: opts.transcript,
       tools: opts.tools,
       tool_choice: 'auto',
-      max_output_tokens: opts.maxTokens,
-      temperature: opts.temperature,
       stream: opts.streaming,
     };
+    if (opts.maxTokens !== undefined) body.max_output_tokens = opts.maxTokens;
+    if (opts.temperature !== undefined) body.temperature = opts.temperature;
 
     const requestUrl = buildProtocolUrl(opts.baseURL, 'responses');
     const res = await fetch(requestUrl, {
@@ -1204,10 +1204,10 @@ const claudeAdapter: ProviderAdapter = {
       ],
       messages: opts.transcript,
       tools: opts.tools,
-      max_tokens: opts.maxTokens,
+      max_tokens: opts.maxTokens ?? 4096,
       stream: opts.streaming,
     };
-    if (supportsSamplingParams(opts.model)) {
+    if (supportsSamplingParams(opts.model) && opts.temperature !== undefined) {
       body.temperature = opts.temperature;
     }
 
@@ -1629,8 +1629,8 @@ export interface RunToolAgentOptions {
   apiKey: string;
   baseURL: string;
   model: string;
-  maxTokens: number;
-  temperature: number;
+  maxTokens?: number;
+  temperature?: number;
   streaming: boolean;
   systemPrompt: string;
   history: HistoryTurn[];

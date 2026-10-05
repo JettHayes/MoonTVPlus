@@ -44,15 +44,16 @@ export default function AIComments({ movieName, movieInfo }: AICommentsProps) {
         cache: 'no-store', // 禁用缓存
       });
 
-      if (!response.ok) {
-        const data = await response.json();
+      // 服务端流式返回一个 JSON（生成期间发送空白心跳避免网关超时），
+      // JSON 前导空白会被忽略，这里照常解析即可。
+      const data = await response.json();
+
+      if (!response.ok || data.error) {
         throw new Error(data.error || '生成AI评论失败');
       }
 
-      const data = await response.json();
-      console.log('AI评论生成成功:', data.comments.length);
-
-      setComments(data.comments);
+      console.log('AI评论生成成功:', data.comments?.length ?? 0);
+      setComments(data.comments || []);
     } catch (err) {
       console.error('生成AI评论失败:', err);
       setError(err instanceof Error ? err.message : '生成AI评论失败');

@@ -1042,27 +1042,44 @@ export default function AIChatPanel({
           {/* 快捷提示 */}
           {messages.length === 1 && !isStreaming && (
             <div className='mt-3 flex flex-wrap gap-2'>
-              <button
-                onClick={() => setInput('推荐一些高分电影')}
-                className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
-              >
-                推荐高分电影
-              </button>
-              <button
-                onClick={() => setInput('最近有什么新电影上映？')}
-                className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
-              >
-                最新上映
-              </button>
-              {context?.title && (
-                <button
-                  onClick={() =>
-                    setInput(`${context.title}讲的是什么故事？`)
-                  }
-                  className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
-                >
-                  剧情介绍
-                </button>
+              {context?.title ? (
+                <>
+                  <button
+                    onClick={() =>
+                      setInput(`${context.title}讲的是什么故事？`)
+                    }
+                    className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+                  >
+                    剧情介绍
+                  </button>
+                  <button
+                    onClick={() => setInput(`${context.title}这部作品评价怎么样？`)}
+                    className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+                  >
+                    这部作品的评价
+                  </button>
+                  <button
+                    onClick={() => setInput(`${context.title}有没有续集？`)}
+                    className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+                  >
+                    有没有续集
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setInput('推荐一些高分电影')}
+                    className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+                  >
+                    推荐高分电影
+                  </button>
+                  <button
+                    onClick={() => setInput('最近有什么新电影上映？')}
+                    className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+                  >
+                    最新上映
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -1253,27 +1270,44 @@ export default function AIChatPanel({
           {/* 快捷提示 */}
           {messages.length === 1 && !isStreaming && (
             <div className='mt-3 flex flex-wrap gap-2'>
-              <button
-                onClick={() => setInput('推荐一些高分电影')}
-                className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
-              >
-                推荐高分电影
-              </button>
-              <button
-                onClick={() => setInput('最近有什么新电影上映？')}
-                className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
-              >
-                最新上映
-              </button>
-              {context?.title && (
-                <button
-                  onClick={() =>
-                    setInput(`${context.title}讲的是什么故事？`)
-                  }
-                  className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
-                >
-                  剧情介绍
-                </button>
+              {context?.title ? (
+                <>
+                  <button
+                    onClick={() =>
+                      setInput(`${context.title}讲的是什么故事？`)
+                    }
+                    className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+                  >
+                    剧情介绍
+                  </button>
+                  <button
+                    onClick={() => setInput(`${context.title}这部作品评价怎么样？`)}
+                    className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+                  >
+                    这部作品的评价
+                  </button>
+                  <button
+                    onClick={() => setInput(`${context.title}有没有续集？`)}
+                    className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+                  >
+                    有没有续集
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setInput('推荐一些高分电影')}
+                    className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+                  >
+                    推荐高分电影
+                  </button>
+                  <button
+                    onClick={() => setInput('最近有什么新电影上映？')}
+                    className='rounded-full bg-gray-100 px-3 py-1 text-xs text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
+                  >
+                    最新上映
+                  </button>
+                </>
               )}
             </div>
           )}

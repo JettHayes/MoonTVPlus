@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
+import { signOidcSession } from '@/lib/oidc-session';
 import {
   generateRefreshToken,
   generateTokenId,
@@ -259,17 +260,16 @@ export async function GET(request: NextRequest) {
     }
 
     // 需要注册,跳转到用户名输入页面
-    // 将OIDC信息存储到session中
-    const oidcSession = {
+    // 将OIDC信息用PASSWORD签名后存储到session cookie(与账号密码登录一致,防止cookie被伪造)
+    const oidcSession = await signOidcSession({
       sub: oidcSub,
       email: userInfo.email,
       name: userInfo.name,
       trust_level: userInfo.trust_level, // 提取trust_level字段
-      timestamp: Date.now(),
-    };
+    });
 
     const response = NextResponse.redirect(new URL('/oidc-register', origin));
-    response.cookies.set('oidc_session', JSON.stringify(oidcSession), {
+    response.cookies.set('oidc_session', oidcSession, {
       path: '/',
       httpOnly: true,
       sameSite: 'lax',

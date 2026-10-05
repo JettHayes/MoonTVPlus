@@ -17,6 +17,10 @@
 import { getAuthInfoFromBrowserCookie, clearAuthCookie } from './auth';
 import { normalizeEpisodeFilterConfig } from './episode-filter';
 import { MangaReadRecord, MangaShelfItem } from './manga.types';
+import {
+  filterRecordsBySpecialSourceContext,
+  isSpecialSourceContext,
+} from './special-source.client';
 import { isLoginPathname, resolveLoginPath } from './tv-mode';
 import { DanmakuFilterConfig, EpisodeFilterConfig, SkipConfig } from './types';
 
@@ -113,6 +117,8 @@ const DEFAULT_MAX_MANGA_HISTORY_RECORDS = 100;
 const DEFAULT_MAX_MANGA_HISTORY_THRESHOLD =
   DEFAULT_MAX_MANGA_HISTORY_RECORDS + 10;
 const SEARCH_HISTORY_KEY = 'moontv_search_history';
+// 特殊源（/under）搜索历史只存本机，用独立 key 与普通历史隔离
+const SEARCH_HISTORY_SPECIAL_KEY = 'moontv_search_history_special';
 const MUSIC_PLAY_RECORDS_KEY = 'moontv_music_play_records';
 
 // 缓存相关常量
@@ -769,7 +775,7 @@ export function generateStorageKey(source: string, id: string): string {
  * 非本地存储模式下使用混合缓存策略：优先返回缓存数据，后台异步同步最新数据。
  * 在服务端渲染阶段 (window === undefined) 时返回空对象，避免报错。
  */
-export async function getAllPlayRecords(): Promise<Record<string, PlayRecord>> {
+async function getAllPlayRecordsRaw(): Promise<Record<string, PlayRecord>> {
   // 服务器端渲染阶段直接返回空，交由客户端 useEffect 再行请求
   if (typeof window === 'undefined') {
     return {};
@@ -829,7 +835,22 @@ export async function getAllPlayRecords(): Promise<Record<string, PlayRecord>> {
   }
 }
 
+/**
+ * 读取当前入口可见的播放记录：普通路径不含特殊源，/under 只含特殊源。
+ * 写路径（保存/删除/迁移）走 getAllPlayRecordsRaw，避免读-改-写抹掉另一侧的数据。
+ */
+export async function getAllPlayRecords(): Promise<Record<string, PlayRecord>> {
+  return filterRecordsBySpecialSourceContext(await getAllPlayRecordsRaw());
+}
+
+/** 同 getAllPlayRecords，按当前入口过滤后返回缓存快照 */
 export function getCachedPlayRecordsSnapshot(): Record<string, PlayRecord> {
+  return filterRecordsBySpecialSourceContext(
+    getCachedPlayRecordsSnapshotRaw()
+  );
+}
+
+function getCachedPlayRecordsSnapshotRaw(): Record<string, PlayRecord> {
   if (typeof window === 'undefined') {
     return {};
   }
@@ -965,7 +986,7 @@ export async function savePlayRecord(
   }
 
   try {
-    const allRecords = await getAllPlayRecords();
+    const allRecords = await getAllPlayRecordsRaw();
     allRecords[key] = record;
     localStorage.setItem(PLAY_RECORDS_KEY, JSON.stringify(allRecords));
     window.dispatchEvent(
@@ -1024,7 +1045,7 @@ export async function deletePlayRecord(
   }
 
   try {
-    const allRecords = await getAllPlayRecords();
+    const allRecords = await getAllPlayRecordsRaw();
     delete allRecords[key];
     localStorage.setItem(PLAY_RECORDS_KEY, JSON.stringify(allRecords));
     window.dispatchEvent(
@@ -1082,7 +1103,7 @@ export async function deletePlayRecords(keys: string[]): Promise<void> {
   }
 
   try {
-    const allRecords = await getAllPlayRecords();
+    const allRecords = await getAllPlayRecordsRaw();
     uniqueKeys.forEach((key) => {
       delete allRecords[key];
     });
@@ -1168,7 +1189,7 @@ export async function migratePlayRecord(
   }
 
   try {
-    const allRecords = await getAllPlayRecords();
+    const allRecords = await getAllPlayRecordsRaw();
     delete allRecords[fromKey];
     allRecords[toKey] = record;
     localStorage.setItem(PLAY_RECORDS_KEY, JSON.stringify(allRecords));
@@ -1187,6 +1208,38 @@ export async function migratePlayRecord(
 /* ---------------- 搜索历史相关 API ---------------- */
 
 /**
+ * 特殊源（/under）上下文的搜索历史：只存本机 localStorage，不同步服务端、不进导出/迁移。
+ * 搜索关键词本身不带源信息，无法在读出口用 filterRecordsBySpecialSourceContext 过滤，
+ * 因此改在写入时按入口分流：/under 只写本机特殊源桶，普通入口维持原有行为，双向互不可见。
+ * 与「特殊源入口是本机 cookie、只影响这台设备」的口径一致。
+ */
+function getSpecialSearchHistoryLocal(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(SEARCH_HISTORY_SPECIAL_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as string[];
+    return Array.isArray(arr) ? Array.from(new Set(arr)) : [];
+  } catch (err) {
+    console.error('读取特殊源搜索历史失败:', err);
+    return [];
+  }
+}
+
+/** 写入本机特殊源搜索历史，并广播更新事件（供搜索页监听刷新） */
+function setSpecialSearchHistoryLocal(history: string[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(SEARCH_HISTORY_SPECIAL_KEY, JSON.stringify(history));
+  } catch (err) {
+    console.error('保存特殊源搜索历史失败:', err);
+  }
+  window.dispatchEvent(
+    new CustomEvent('searchHistoryUpdated', { detail: history })
+  );
+}
+
+/**
  * 获取搜索历史。
  * 数据库存储模式下使用混合缓存策略：优先返回缓存数据，后台异步同步最新数据。
  */
@@ -1194,6 +1247,11 @@ export async function getSearchHistory(): Promise<string[]> {
   // 服务器端渲染阶段直接返回空
   if (typeof window === 'undefined') {
     return [];
+  }
+
+  // 特殊源（/under）上下文：只读本机特殊源历史，与普通入口双向隔离
+  if (isSpecialSourceContext()) {
+    return getSpecialSearchHistoryLocal();
   }
 
   // 数据库存储模式：使用混合缓存策略（包括 redis 和 upstash）
@@ -1263,6 +1321,17 @@ export async function addSearchHistory(keyword: string): Promise<void> {
   const trimmed = keyword.trim();
   if (!trimmed) return;
 
+  // 特殊源（/under）上下文：只写本机特殊源历史，不落服务端
+  if (isSpecialSourceContext()) {
+    const history = getSpecialSearchHistoryLocal();
+    const newHistory = [trimmed, ...history.filter((k) => k !== trimmed)];
+    if (newHistory.length > SEARCH_HISTORY_LIMIT) {
+      newHistory.length = SEARCH_HISTORY_LIMIT;
+    }
+    setSpecialSearchHistoryLocal(newHistory);
+    return;
+  }
+
   // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 立即更新缓存
@@ -1323,6 +1392,12 @@ export async function addSearchHistory(keyword: string): Promise<void> {
  * 数据库存储模式下使用乐观更新：先更新缓存，再异步同步到数据库。
  */
 export async function clearSearchHistory(): Promise<void> {
+  // 特殊源（/under）上下文：只清本机特殊源历史
+  if (isSpecialSourceContext()) {
+    setSpecialSearchHistoryLocal([]);
+    return;
+  }
+
   // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
     // 立即更新缓存
@@ -1363,6 +1438,13 @@ export async function clearSearchHistory(): Promise<void> {
 export async function deleteSearchHistory(keyword: string): Promise<void> {
   const trimmed = keyword.trim();
   if (!trimmed) return;
+
+  // 特殊源（/under）上下文：只删本机特殊源历史
+  if (isSpecialSourceContext()) {
+    const history = getSpecialSearchHistoryLocal();
+    setSpecialSearchHistoryLocal(history.filter((k) => k !== trimmed));
+    return;
+  }
 
   // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
   if (STORAGE_TYPE !== 'localstorage') {
@@ -1420,10 +1502,10 @@ let lastFavoritesBackgroundFetchTime = 0;
 const MIN_BACKGROUND_FETCH_INTERVAL = 3000; // 3秒内不重复后台请求
 
 /**
- * 获取全部收藏。
+ * 获取全部收藏（未按入口过滤，仅供内部读-改-写使用）。
  * 数据库存储模式下使用混合缓存策略：优先返回缓存数据，后台异步同步最新数据。
  */
-export async function getAllFavorites(): Promise<Record<string, Favorite>> {
+async function getAllFavoritesRaw(): Promise<Record<string, Favorite>> {
   // 服务器端渲染阶段直接返回空
   if (typeof window === 'undefined') {
     return {};
@@ -1508,6 +1590,13 @@ export async function getAllFavorites(): Promise<Record<string, Favorite>> {
 }
 
 /**
+ * 获取当前入口可见的收藏：普通路径不含特殊源，/under 只含特殊源。
+ */
+export async function getAllFavorites(): Promise<Record<string, Favorite>> {
+  return filterRecordsBySpecialSourceContext(await getAllFavoritesRaw());
+}
+
+/**
  * 保存收藏。
  * 数据库存储模式下使用乐观更新：先更新缓存，再异步同步到数据库。
  */
@@ -1556,7 +1645,7 @@ export async function saveFavorite(
   }
 
   try {
-    const allFavorites = await getAllFavorites();
+    const allFavorites = await getAllFavoritesRaw();
     allFavorites[key] = favorite;
     localStorage.setItem(FAVORITES_KEY, JSON.stringify(allFavorites));
     window.dispatchEvent(
@@ -1615,7 +1704,7 @@ export async function deleteFavorite(
   }
 
   try {
-    const allFavorites = await getAllFavorites();
+    const allFavorites = await getAllFavoritesRaw();
     delete allFavorites[key];
     localStorage.setItem(FAVORITES_KEY, JSON.stringify(allFavorites));
     window.dispatchEvent(
@@ -1651,96 +1740,99 @@ export async function isFavorited(
     } else {
       // 缓存为空时，调用 getAllFavorites() 来获取并缓存数据
       // 这样可以复用 getAllFavorites() 中的防重复请求机制
-      const allFavorites = await getAllFavorites();
+      const allFavorites = await getAllFavoritesRaw();
       return !!allFavorites[key];
     }
   }
 
   // localStorage 模式
-  const allFavorites = await getAllFavorites();
+  const allFavorites = await getAllFavoritesRaw();
   return !!allFavorites[key];
 }
 
 /**
- * 清空全部播放记录
- * 数据库存储模式下使用乐观更新：先更新缓存，再异步同步到数据库。
+ * 清空当前入口可见的播放记录：
+ * 普通入口只清普通源，/under 只清特殊源，另一侧的数据保留（与读路径隔离口径一致）。
  */
 export async function clearAllPlayRecords(): Promise<void> {
-  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
-  if (STORAGE_TYPE !== 'localstorage') {
-    // 立即更新缓存
-    cacheManager.cachePlayRecords({});
+  if (STORAGE_TYPE === 'localstorage' && typeof window === 'undefined') return;
 
-    // 触发立即更新事件
-    window.dispatchEvent(
-      new CustomEvent('playRecordsUpdated', {
-        detail: {},
-      })
-    );
-
-    // 异步同步到数据库
-    try {
-      await fetchWithAuth(`/api/playrecords`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-      });
-    } catch (err) {
-      await handleDatabaseOperationFailure('playRecords', err);
-      triggerGlobalError('清空播放记录失败');
-      throw err;
-    }
-    return;
-  }
-
-  // localStorage 模式
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem(PLAY_RECORDS_KEY);
-  window.dispatchEvent(
-    new CustomEvent('playRecordsUpdated', {
-      detail: {},
-    })
-  );
+  const raw = await getAllPlayRecordsRaw();
+  const visibleKeys = Object.keys(filterRecordsBySpecialSourceContext(raw));
+  // 复用批删：DB 模式一次请求、localStorage 模式一次落盘；无可见记录时自动 no-op
+  await deletePlayRecords(visibleKeys);
 }
 
 /**
- * 清空全部收藏
- * 数据库存储模式下使用乐观更新：先更新缓存，再异步同步到数据库。
+ * 批量删除收藏（按 source+id 组成的 key）。
+ * 与 deletePlayRecords 对称：DB 模式一次性乐观更新 + 一次 API 请求。
  */
-export async function clearAllFavorites(): Promise<void> {
-  // 数据库存储模式：乐观更新策略（包括 redis 和 upstash）
-  if (STORAGE_TYPE !== 'localstorage') {
-    // 立即更新缓存
-    cacheManager.cacheFavorites({});
+export async function deleteFavorites(keys: string[]): Promise<void> {
+  const uniqueKeys = Array.from(new Set(keys)).filter(Boolean);
+  if (uniqueKeys.length === 0) return;
 
-    // 触发立即更新事件
+  // 数据库存储模式：一次性乐观更新 + 一次 API 请求
+  if (STORAGE_TYPE !== 'localstorage') {
+    const cachedFavorites = cacheManager.getCachedFavorites() || {};
+    uniqueKeys.forEach((key) => {
+      delete cachedFavorites[key];
+    });
+    cacheManager.cacheFavorites(cachedFavorites);
+
     window.dispatchEvent(
       new CustomEvent('favoritesUpdated', {
-        detail: {},
+        detail: cachedFavorites,
       })
     );
 
-    // 异步同步到数据库
     try {
-      await fetchWithAuth(`/api/favorites`, {
+      await fetchWithAuth('/api/favorites', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keys: uniqueKeys }),
       });
     } catch (err) {
       await handleDatabaseOperationFailure('favorites', err);
-      triggerGlobalError('清空收藏失败');
+      triggerGlobalError('删除收藏失败');
       throw err;
     }
     return;
   }
 
-  // localStorage 模式
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem(FAVORITES_KEY);
-  window.dispatchEvent(
-    new CustomEvent('favoritesUpdated', {
-      detail: {},
-    })
-  );
+  // localStorage 模式：一次性更新本地数据和事件
+  if (typeof window === 'undefined') {
+    console.warn('无法在服务端删除收藏到 localStorage');
+    return;
+  }
+
+  try {
+    const allFavorites = await getAllFavoritesRaw();
+    uniqueKeys.forEach((key) => {
+      delete allFavorites[key];
+    });
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(allFavorites));
+    window.dispatchEvent(
+      new CustomEvent('favoritesUpdated', {
+        detail: allFavorites,
+      })
+    );
+  } catch (err) {
+    console.error('批量删除收藏失败:', err);
+    triggerGlobalError('删除收藏失败');
+    throw err;
+  }
+}
+
+/**
+ * 清空当前入口可见的收藏：
+ * 普通入口只清普通源，/under 只清特殊源，另一侧的数据保留。
+ */
+export async function clearAllFavorites(): Promise<void> {
+  if (STORAGE_TYPE === 'localstorage' && typeof window === 'undefined') return;
+
+  const raw = await getAllFavoritesRaw();
+  const visibleKeys = Object.keys(filterRecordsBySpecialSourceContext(raw));
+  await deleteFavorites(visibleKeys);
 }
 
 // ---------------- 漫画书架 / 历史 API ----------------
@@ -2195,6 +2287,20 @@ export function subscribeToDataUpdates<T>(
   }
 
   const handleUpdate = (event: CustomEvent) => {
+    // 收藏 / 播放记录的推送同样按入口过滤，与 getAll* 出口保持一致
+    if (
+      eventType === 'playRecordsUpdated' ||
+      eventType === 'favoritesUpdated'
+    ) {
+      callback(filterRecordsBySpecialSourceContext(event.detail) as T);
+      return;
+    }
+    // 搜索历史按入口隔离：/under 上下文只认本机特殊源历史，
+    // 忽略服务端普通历史的后台推送（避免切到 /under 时普通词闪现）
+    if (eventType === 'searchHistoryUpdated' && isSpecialSourceContext()) {
+      callback(getSpecialSearchHistoryLocal() as T);
+      return;
+    }
     callback(event.detail);
   };
 

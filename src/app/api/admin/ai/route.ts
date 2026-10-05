@@ -64,6 +64,7 @@ export async function POST(request: NextRequest) {
       EnableVideoCardEntry,
       EnablePlayPageEntry,
       EnableAIComments,
+      EnableAICommentsToolMode,
       Temperature,
       MaxTokens,
       SystemPrompt,
@@ -105,6 +106,7 @@ export async function POST(request: NextRequest) {
       EnableVideoCardEntry: boolean;
       EnablePlayPageEntry: boolean;
       EnableAIComments: boolean;
+      EnableAICommentsToolMode?: boolean;
       Temperature?: number;
       MaxTokens?: number;
       SystemPrompt?: string;
@@ -153,6 +155,8 @@ export async function POST(request: NextRequest) {
       typeof EnableVideoCardEntry !== 'boolean' ||
       typeof EnablePlayPageEntry !== 'boolean' ||
       typeof EnableAIComments !== 'boolean' ||
+      (EnableAICommentsToolMode !== undefined &&
+        typeof EnableAICommentsToolMode !== 'boolean') ||
       (Temperature !== undefined && typeof Temperature !== 'number') ||
       (MaxTokens !== undefined && typeof MaxTokens !== 'number') ||
       (SystemPrompt !== undefined && typeof SystemPrompt !== 'string') ||
@@ -207,6 +211,7 @@ export async function POST(request: NextRequest) {
       EnableVideoCardEntry,
       EnablePlayPageEntry,
       EnableAIComments,
+      EnableAICommentsToolMode,
       Temperature,
       MaxTokens,
       SystemPrompt,

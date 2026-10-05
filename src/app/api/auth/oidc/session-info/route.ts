@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { verifyOidcSession } from '@/lib/oidc-session';
+
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
@@ -13,10 +15,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    let oidcSession;
-    try {
-      oidcSession = JSON.parse(oidcSessionCookie);
-    } catch {
+    // 校验会话签名(PASSWORD)，防止伪造cookie
+    const oidcSession = await verifyOidcSession(oidcSessionCookie);
+    if (!oidcSession) {
       return NextResponse.json(
         { error: 'OIDC会话无效' },
         { status: 400 }

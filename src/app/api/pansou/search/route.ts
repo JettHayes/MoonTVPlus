@@ -8,6 +8,17 @@ import { PansouLink, searchPansou } from '@/lib/pansou.client';
 
 export const runtime = 'nodejs';
 
+// NetDiskConfig 平台键 -> pansou 网盘类型键
+const NETDISK_CONFIG_TO_CLOUD_TYPE: Record<string, string> = {
+  Quark: 'quark',
+  Mobile: 'mobile',
+  Baidu: 'baidu',
+  Tianyi: 'tianyi',
+  Pan123: '123',
+  UC: 'uc',
+  Pan115: '115',
+};
+
 export async function POST(request: NextRequest) {
   try {
     const authResult = await requireFeaturePermission(
@@ -91,6 +102,40 @@ export async function POST(request: NextRequest) {
         ...results,
         merged_by_type: mergedByType,
         total,
+      };
+    }
+
+    // 已配置账号的网盘类型排在前面
+    const netDiskConfig = (config.NetDiskConfig || {}) as Record<
+      string,
+      { Enabled?: boolean } | undefined
+    >;
+    const configuredCloudTypes = new Set<string>();
+    Object.entries(NETDISK_CONFIG_TO_CLOUD_TYPE).forEach(
+      ([configKey, cloudType]) => {
+        if (netDiskConfig[configKey]?.Enabled) {
+          configuredCloudTypes.add(cloudType);
+        }
+      }
+    );
+
+    if (configuredCloudTypes.size > 0 && filteredResults.merged_by_type) {
+      const reordered: Record<string, PansouLink[]> = {};
+      Object.entries(filteredResults.merged_by_type)
+        .map(([type, links], index) => ({ type, links, index }))
+        .sort((a, b) => {
+          const aPriority = configuredCloudTypes.has(a.type) ? 0 : 1;
+          const bPriority = configuredCloudTypes.has(b.type) ? 0 : 1;
+          if (aPriority !== bPriority) return aPriority - bPriority;
+          return a.index - b.index; // 同优先级保持原有顺序
+        })
+        .forEach(({ type, links }) => {
+          reordered[type] = links;
+        });
+
+      filteredResults = {
+        ...filteredResults,
+        merged_by_type: reordered,
       };
     }
 
