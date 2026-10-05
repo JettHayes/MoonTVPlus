@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
     const includeFailed = searchParams.get('includeFailed') !== 'false';
     const noCache = searchParams.get('noCache') === 'true';
     const categoryFilter = (searchParams.get('category') || '').trim();
+    const keyword = (searchParams.get('q') || '').trim().normalize('NFKC').toLowerCase();
 
     const config = await getConfig();
     const openListConfig = config.OpenListConfig;
@@ -157,6 +158,14 @@ export async function GET(request: NextRequest) {
       } else {
         allVideos = allVideos.filter((v) => v.category === categoryFilter);
       }
+    }
+
+    if (keyword) {
+      allVideos = allVideos.filter((video) =>
+        [video.title, video.folder].some((value) =>
+          (value || '').normalize('NFKC').toLowerCase().includes(keyword)
+        )
+      );
     }
 
     // 按更新时间倒序排序
