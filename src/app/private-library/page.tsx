@@ -2,9 +2,9 @@
 
 'use client';
 
-import { ArrowDownWideNarrow, ArrowUpNarrowWide,Film } from 'lucide-react';
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, Film, Search, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo,useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { base58Encode } from '@/lib/utils';
@@ -94,6 +94,11 @@ export default function PrivateLibraryPage() {
   // OpenList 分类筛选（PathMeta 完全匹配后的 category）
   const [openlistCategory, setOpenlistCategory] = useState<string>('all');
   const [openlistCategories, setOpenlistCategories] = useState<string[]>([]);
+  const [librarySearchInput, setLibrarySearchInput] = useState('');
+  const [librarySearchQuery, setLibrarySearchQuery] = useState('');
+  const [libraryTotal, setLibraryTotal] = useState<number | null>(null);
+  const librarySearchInputRef = useRef<HTMLInputElement>(null);
+  const isComposingSearchRef = useRef(false);
   const pageSize = 20;
   const observerTarget = useRef<HTMLDivElement>(null);
   const isFetchingRef = useRef(false);
@@ -105,6 +110,35 @@ export default function PrivateLibraryPage() {
   const scrollLeftRef = useRef(0);
   const isInitializedRef = useRef(false);
   const hasRestoredViewRef = useRef(false);
+
+  const applyLibrarySearch = useCallback((value: string) => {
+    const query = value.trim();
+    if (query === librarySearchQuery) return;
+    abortControllerRef.current?.abort();
+    isFetchingRef.current = false;
+    setPage(1);
+    setVideos([]);
+    setHasMore(true);
+    setError('');
+    setLoading(true);
+    setLoadingMore(false);
+    setLibraryTotal(null);
+    setLibrarySearchQuery(query);
+  }, [librarySearchQuery]);
+
+  const clearLibrarySearch = () => {
+    setLibrarySearchInput('');
+    applyLibrarySearch('');
+    librarySearchInputRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (sourceType === 'xiaoya' || isComposingSearchRef.current) return;
+    const timer = setTimeout(() => {
+      if (!isComposingSearchRef.current) applyLibrarySearch(librarySearchInput);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [librarySearchInput, sourceType, applyLibrarySearch]);
 
   // 客户端挂载标记
   useEffect(() => {
@@ -474,14 +508,14 @@ export default function PrivateLibraryPage() {
         setError('');
 
         const endpoint = sourceType === 'openlist'
-          ? `/api/openlist/list?page=${page}&pageSize=${pageSize}${
+          ? `/api/openlist/list?page=${page}&pageSize=${pageSize}&q=${encodeURIComponent(librarySearchQuery)}${
               openlistCategory && openlistCategory !== 'all'
                 ? `&category=${encodeURIComponent(openlistCategory)}`
                 : ''
             }`
           : sourceType === 'xiaoya'
           ? `/api/xiaoya/browse?path=${encodeURIComponent(xiaoyaPath)}`
-          : `/api/emby/list?page=${page}&pageSize=${pageSize}${selectedView !== 'all' ? `&parentId=${selectedView}` : ''}&embyKey=${embyKey}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
+          : `/api/emby/list?page=${page}&pageSize=${pageSize}&q=${encodeURIComponent(librarySearchQuery)}${selectedView !== 'all' ? `&parentId=${selectedView}` : ''}&embyKey=${embyKey}&sortBy=${sortBy}&sortOrder=${sortOrder}`;
 
         const response = await fetch(endpoint, { signal: abortController.signal });
 
@@ -490,6 +524,7 @@ export default function PrivateLibraryPage() {
         }
 
         const data = await response.json();
+        if (abortController.signal.aborted || abortControllerRef.current !== abortController) return;
 
         if (data.error) {
           setError(data.error);
@@ -508,6 +543,7 @@ export default function PrivateLibraryPage() {
               setOpenlistCategories(data.categories);
             }
 
+            setLibraryTotal(typeof data.total === 'number' ? data.total : null);
             const newVideos = data.list || [];
 
             if (isInitial) {
@@ -525,7 +561,7 @@ export default function PrivateLibraryPage() {
         }
       } catch (err: any) {
         // 忽略取消请求的错误
-        if (err.name === 'AbortError') {
+        if (err.name === 'AbortError' || abortController.signal.aborted) {
           return;
         }
         console.error('获取视频列表失败:', err);
@@ -554,7 +590,7 @@ export default function PrivateLibraryPage() {
         abortControllerRef.current.abort();
       }
     };
-  }, [sourceType, embyKey, page, selectedView, xiaoyaPath, runtimeConfig, sortBy, sortOrder, openlistCategory]);
+  }, [sourceType, embyKey, page, selectedView, xiaoyaPath, runtimeConfig, sortBy, sortOrder, openlistCategory, librarySearchQuery]);
 
   const handleVideoClick = (video: Video) => {
     // 构建source参数
@@ -621,7 +657,7 @@ export default function PrivateLibraryPage() {
 
         {/* 第一级：源类型选择（OpenList / Emby / 小雅） */}
         {mounted && (
-          <div className='mb-6 flex justify-center'>
+          <div className='mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
             <CapsuleSwitch
               options={[
                 ...(runtimeConfig.OPENLIST_ENABLED ? [{ label: 'OpenList', value: 'openlist' }] : []),
@@ -631,6 +667,62 @@ export default function PrivateLibraryPage() {
               active={sourceType}
               onChange={(value) => setSourceType(value as LibrarySourceType)}
             />
+            {sourceType !== 'xiaoya' && (
+              <form
+                role='search'
+                aria-label='搜索私人影库'
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!isComposingSearchRef.current) applyLibrarySearch(librarySearchInput);
+                }}
+                className='flex w-full items-center gap-2 rounded-xl border border-green-200 bg-white/80 p-1.5 pl-3 focus-within:border-green-500 focus-within:ring-2 focus-within:ring-green-500/10 dark:border-gray-600 dark:bg-gray-800/80 sm:max-w-xl'
+              >
+                <Search className='h-4 w-4 shrink-0 text-gray-400' aria-hidden='true' />
+                <input
+                  ref={librarySearchInputRef}
+                  type='text'
+                  value={librarySearchInput}
+                  onChange={(event) => setLibrarySearchInput(event.target.value)}
+                  onCompositionStart={() => { isComposingSearchRef.current = true; }}
+                  onCompositionEnd={(event) => {
+                    isComposingSearchRef.current = false;
+                    applyLibrarySearch(event.currentTarget.value);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape' && !isComposingSearchRef.current) clearLibrarySearch();
+                  }}
+                  aria-label={sourceType === 'openlist' ? '搜索片名或原文件夹名' : '搜索片名'}
+                  placeholder={sourceType === 'openlist' ? '搜索片名或原文件夹名…' : '搜索片名…'}
+                  autoComplete='off'
+                  className='h-9 min-w-0 flex-1 bg-transparent text-base text-gray-900 placeholder:text-gray-400 focus:outline-none dark:text-gray-100 sm:text-sm'
+                />
+                {librarySearchInput && (
+                  <button
+                    type='button'
+                    onClick={clearLibrarySearch}
+                    aria-label='清空搜索'
+                    className='rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-200'
+                  >
+                    <X className='h-4 w-4' aria-hidden='true' />
+                  </button>
+                )}
+                <button type='submit' className='shrink-0 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700'>
+                  搜索
+                </button>
+              </form>
+            )}
+          </div>
+        )}
+
+        {sourceType !== 'xiaoya' && (
+          <div aria-live='polite' className='mb-5 text-sm text-gray-500 dark:text-gray-400'>
+            {loading
+              ? (librarySearchQuery ? '搜索中…' : '加载中…')
+              : error
+              ? '列表加载失败，请稍后重试'
+              : librarySearchQuery
+              ? '“' + librarySearchQuery + '” · 找到 ' + (libraryTotal ?? videos.length) + ' 个条目'
+              : '全部 ' + (libraryTotal ?? videos.length) + ' 个条目'}
           </div>
         )}
 
@@ -1127,7 +1219,9 @@ export default function PrivateLibraryPage() {
         ) : videos.length === 0 ? (
           <div className='text-center py-12'>
             <p className='text-gray-500 dark:text-gray-400'>
-              {sourceType === 'openlist'
+              {librarySearchQuery
+                ? '没有找到匹配的视频，请尝试更短的关键词或切换影库来源'
+                : sourceType === 'openlist'
                 ? '暂无视频，请在管理面板配置 OpenList 并刷新'
                 : '暂无视频，请在管理面板配置 Emby'}
             </p>
