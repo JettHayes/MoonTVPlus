@@ -3493,6 +3493,12 @@ const OpenListConfigComponent = ({
     }>
   >([]);
   const [videos, setVideos] = useState<any[]>([]);
+  const videoPageSize = 100;
+  const [videoPage, setVideoPage] = useState(1);
+  const [videoTotal, setVideoTotal] = useState(0);
+  const [videosLoading, setVideosLoading] = useState(false);
+  const videoRequestId = useRef(0);
+  const videoTotalPages = Math.max(1, Math.ceil(videoTotal / videoPageSize));
   const [refreshing, setRefreshing] = useState(false);
   const [scanProgress, setScanProgress] = useState<{
     current: number;
@@ -3561,21 +3567,44 @@ const OpenListConfigComponent = ({
     }
   }, [config]);
 
-  const fetchVideos = async (noCache = false) => {
+  const fetchVideos = async (
+    noCache = false,
+    page = videoPage
+  ): Promise<void> => {
+    const requestId = ++videoRequestId.current;
+    setVideosLoading(true);
     try {
-      setRefreshing(true);
-      const url = `/api/openlist/list?page=1&pageSize=100&includeFailed=true${
-        noCache ? '&noCache=true' : ''
-      }`;
-      const response = await fetch(url);
-      if (response.ok) {
-        const data = await response.json();
-        setVideos(data.list || []);
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(videoPageSize),
+        includeFailed: 'true',
+      });
+      if (noCache) params.set('noCache', 'true');
+      const response = await fetch(`/api/openlist/list?${params}`);
+      if (!response.ok) {
+        throw new Error(`获取视频列表失败：${response.status}`);
       }
+      const data = await response.json();
+      if (!data.success || !Array.isArray(data.list)) {
+        throw new Error(data.error || '视频列表返回异常');
+      }
+      if (requestId !== videoRequestId.current) return;
+      const totalPages = Math.max(1, Math.ceil(data.total / videoPageSize));
+      if (page > totalPages) {
+        await fetchVideos(noCache, totalPages);
+        return;
+      }
+      setVideos(data.list);
+      setVideoPage(page);
+      setVideoTotal(data.total);
     } catch (error) {
-      console.error('获取视频列表失败:', error);
+      if (requestId !== videoRequestId.current) return;
+      showError(
+        error instanceof Error ? error.message : '获取视频列表失败',
+        showAlert
+      );
     } finally {
-      setRefreshing(false);
+      if (requestId === videoRequestId.current) setVideosLoading(false);
     }
   };
 
@@ -4485,14 +4514,14 @@ const OpenListConfigComponent = ({
               <div className='flex gap-3'>
                 <button
                   onClick={() => handleRefresh(true)}
-                  disabled={refreshing}
+                  disabled={refreshing || videosLoading}
                   className={buttonStyles.warning}
                 >
                   {refreshing ? '扫描中...' : '重新扫描'}
                 </button>
                 <button
                   onClick={() => handleRefresh(false)}
-                  disabled={refreshing}
+                  disabled={refreshing || videosLoading}
                   className={buttonStyles.primary}
                 >
                   {refreshing ? '扫描中...' : '立即扫描'}
@@ -4535,7 +4564,7 @@ const OpenListConfigComponent = ({
               </div>
             )}
 
-            {refreshing ? (
+            {refreshing || videosLoading ? (
               <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
                 加载中...
               </div>
@@ -4662,6 +4691,34 @@ const OpenListConfigComponent = ({
             ) : (
               <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
                 暂无视频，请点击"立即扫描"扫描视频库
+              </div>
+            )}
+            {videoTotal > 0 && (
+              <div className='flex flex-wrap items-center justify-between gap-3 text-sm text-gray-500 dark:text-gray-400'>
+                <span>
+                  共 {videoTotal} 条，每页 {videoPageSize} 条，第 {videoPage} /{' '}
+                  {videoTotalPages} 页
+                </span>
+                <div className='flex gap-2'>
+                  <button
+                    type='button'
+                    onClick={() => fetchVideos(false, videoPage - 1)}
+                    disabled={refreshing || videosLoading || videoPage <= 1}
+                    className={`${buttonStyles.secondarySmall} disabled:opacity-50 disabled:cursor-not-allowed`}
+                  >
+                    上一页
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => fetchVideos(false, videoPage + 1)}
+                    disabled={
+                      refreshing || videosLoading || videoPage >= videoTotalPages
+                    }
+                    className={`${buttonStyles.secondarySmall} disabled:opacity-50 disabled:cursor-not-allowed`}
+                  >
+                    下一页
+                  </button>
+                </div>
               </div>
             )}
           </div>
