@@ -18,12 +18,12 @@ jobs:
             - name: Checkout target repo
               uses: actions/checkout@v5
               with:
-                token: ${{ secrets.GITHUB_TOKEN }}
+                token: ${{ secrets.SYNC_TOKEN }}
 
             - name: Sync Upstream
               uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.3
               with:
-                  target_repo_token: ${{ secrets.GITHUB_TOKEN }}
+                  target_repo_token: ${{ secrets.SYNC_TOKEN }}
                   upstream_sync_repo: mtvpls/MoonTVPlus
                   upstream_sync_branch: main
                   target_sync_branch: main
