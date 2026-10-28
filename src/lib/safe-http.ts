@@ -128,7 +128,10 @@ function wrapResponse(
 export function safeFetch(
   url: string,
   init?: RequestInit,
-  proxy?: string | null
+  proxy?: string | null,
+  options?: { forceNonKeepAlive?: boolean }
 ): Promise<Response> {
-  return doFetch(url, init, proxy).then((res) => wrapResponse(res, url, init, proxy));
+  return doFetch(url, init, proxy, options?.forceNonKeepAlive === true).then(
+    (res) => wrapResponse(res, url, init, proxy)
+  );
 }
