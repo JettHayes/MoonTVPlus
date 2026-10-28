@@ -11,6 +11,19 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: "227.0.1",
+    date: "2026-10-28",
+    added: [
+      // 无新增内容
+    ],
+    changed: [
+    "超分在不支持的环境显示不支持"
+    ],
+    fixed: [
+    "修复电视直播源无法使用http协议"
+    ]
+  },
+  {
     version: "227.0.0",
     date: "2026-10-27",
     added: [

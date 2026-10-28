@@ -8038,18 +8038,25 @@ function PlayPageClient() {
                 return newVal;
               },
             }] : []),
-            ...(webGPUSupported ? [
-              {
-                name: 'Anime4K超分',
-                html: 'Anime4K超分',
-                icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5zm0 18c-4 0-7-3-7-7V9l7-3.5L19 9v4c0 4-3 7-7 7z" fill="#ffffff"/><path d="M10 12l2 2 4-4" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+            {
+              name: 'Anime4K超分',
+              html: 'Anime4K超分',
+              icon: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5zm0 18c-4 0-7-3-7-7V9l7-3.5L19 9v4c0 4-3 7-7 7z" fill="#ffffff"/><path d="M10 12l2 2 4-4" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+              ...(webGPUSupported ? {
                 switch: anime4kEnabledRef.current,
                 onSwitch: async function (item: any) {
                   const newVal = !item.switch;
                   await toggleAnime4K(newVal);
                   return newVal;
                 },
-              },
+              } : {
+                tooltip: '环境不支持',
+                onClick: function () {
+                  return '环境不支持';
+                },
+              }),
+            },
+            ...(webGPUSupported ? [
               {
                 name: '超分模式',
                 html: '超分模式',
